@@ -42,5 +42,8 @@ uploads/
 temp/
 *.tmp
 
+# CLI extraction output
+output/
+
 # Test fixtures — real obituary data must never be committed
 tests/fixtures/*.txt

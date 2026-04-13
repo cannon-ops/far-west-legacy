@@ -21,7 +21,7 @@ Return exactly this JSON structure, populated with data from the obituary:
     "spouses": [{"given_names": "", "surname": ""}],
     "parents": [{"given_names": "", "surname": "", "maiden_name": ""}],
     "children": [{"given_names": "", "surname": ""}],
-    "siblings": [{"given_names": "", "surname": "", "maiden_name": ""}]
+    "siblings": [{"given_names": "", "surname": "", "maiden_name": "", "deceased": false}]
   },
   "eulogy_text": "",
   "service_details": "",
