@@ -61,38 +61,66 @@ The FamilySearch Solutions Agreement includes a publicity restriction:
 - Test fixtures use synthetic/anonymized data only.
 - Never commit customer documents.
 
+## Milestone Status
+
+- **Milestone 1 (complete):** Extraction + CLI + Flask Review UI — 30 tests passing
+  - `src/extract.py` — Claude Haiku extraction (`max_tokens=4096`)
+  - `src/fetch.py` — URL fetch + BeautifulSoup parse
+  - `src/cli.py` — `--text / --file / --url` CLI
+  - `src/app.py` — Flask UI on port 8080 (paste → extract → review → approve)
+- **Milestone 2 (next):** FamilySearch OAuth + sandbox writes
+- **Milestone 3 (future):** Photo/portrait handling, Sonnet vision OCR, production release
+
+## Current File Manifest
+
+| File | Purpose |
+| --- | --- |
+| `src/extract.py` | `extract_from_text()` — Claude Haiku, returns structured dict, raises `ExtractionError` |
+| `src/fetch.py` | `fetch_obituary_text()` — HTTP GET + BS4 parse, raises `FetchError` |
+| `src/cli.py` | CLI: `--text`, `--file`, `--url`; saves JSON to `output/` |
+| `src/app.py` | Flask app port 8080: `GET /`, `POST /extract`, `GET /review/<id>`, `POST /approve/<id>` |
+| `prompts/obituary_extract.md` | System prompt for Haiku; defines schema + field rules |
+| `docs/data_schema.md` | Full JSON schema reference |
+| `ARCHITECTURE.md` | Data flow diagram, input channels, FamilySearch integration plan |
+| `CHANGELOG.md` | Per-session change log |
+
 ## Architecture
 
 ```
 INPUTS
-  ├── Obituary URL        → fetch HTML → extract article text
   ├── Pasted text         → direct
-  └── Photo of clipping   → Claude Sonnet vision → extracted text
+  ├── Obituary URL        → fetch.py (requests + BeautifulSoup)
+  └── Photo/scan          → [future] Claude Sonnet vision
 
-EXTRACTION (Claude API — Haiku for text, Sonnet for photos)
-  └── System prompt → structured JSON output
+EXTRACTION  (Claude Haiku, max_tokens=4096)
+  └── prompts/obituary_extract.md → structured JSON
       {
-        "deceased": { name, gender, birth_date, birth_place,
+        "deceased": { given_names, surname, maiden_name, suffix,
+                      gender, birth_date, birth_place,
                       death_date, death_place, burial_place },
         "relationships": {
-          "spouse": [...], "parents": [...],
-          "children": [...], "siblings": [...]
+          "spouses":  [{ given_names, surname, deceased }],
+          "parents":  [{ given_names, surname, maiden_name, deceased }],
+          "children": [{ given_names, surname, deceased }],
+          "siblings": [{ given_names, surname, maiden_name, deceased }]
         },
         "eulogy_text": "...",
-        "photo_url": "...",
-        "source_url": "..."
+        "service_details": "...",
+        "source_url": "...",
+        "raw_text": "..."
       }
 
-REVIEW UI (Flask on port 8080)
+REVIEW UI  (Flask port 8080)
   └── User confirms / edits all fields before any FamilySearch write
+      tmp/<uuid>.json  →  output/<Surname_Given>.json
 
-FAMILYSEARCH API (sandbox → beta → production)
+FAMILYSEARCH API  [future — sandbox first]
   ├── OAuth 2.0 authentication
   ├── Duplicate check: search before write
-  ├── Create person, relationships
+  ├── Create person + relationships
   ├── Attach Story Memory (eulogy) and Photo Memory
-  ├── Attach Source citation (obituary URL)
-  └── Record hints → open FamilySearch.org for user review
+  ├── Attach Source citation (source_url)
+  └── Record hints → open FamilySearch.org (never display full record)
 ```
 
 ## Key Contacts (do not commit to repo)
