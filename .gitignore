@@ -41,3 +41,6 @@ instance/
 uploads/
 temp/
 *.tmp
+
+# Test fixtures — real obituary data must never be committed
+tests/fixtures/*.txt
