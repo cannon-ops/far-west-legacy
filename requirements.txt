@@ -1,0 +1,22 @@
+# Far West Legacy — Python Dependencies
+
+# Core
+flask>=3.0
+python-dotenv>=1.0
+anthropic>=0.40
+requests>=2.31
+httpx>=0.27
+
+# Obituary fetching & parsing
+beautifulsoup4>=4.12
+lxml>=5.0
+
+# Testing
+pytest>=8.0
+
+# Code quality
+ruff>=0.5
+black>=24.0
+
+# FamilySearch API (OAuth)
+# authlib>=1.3  # uncomment when building OAuth flow
