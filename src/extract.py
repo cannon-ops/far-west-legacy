@@ -67,7 +67,7 @@ def extract_from_text(obituary_text: str, source_url: str = "") -> dict:
     try:
         response = client.messages.create(
             model=MODEL,
-            max_tokens=2048,
+            max_tokens=4096,
             system=system_prompt,
             messages=[{"role": "user", "content": user_message}],
         )
