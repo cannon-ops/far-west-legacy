@@ -235,6 +235,26 @@
       margin-top: 0.5rem;
       color: var(--accent);
     }
+
+    .site-footer {
+      text-align: center;
+      padding: 1.25rem 1rem 1.5rem;
+      margin-top: 2rem;
+      color: var(--muted);
+      font-family: sans-serif;
+      font-size: 0.78rem;
+      border-top: 1px solid var(--border);
+    }
+    .site-footer a {
+      color: var(--muted);
+      text-decoration: none;
+      border-bottom: 1px dotted var(--border);
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .site-footer a:hover {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
   </style>
   {% block head %}{% endblock %}
 </head>
@@ -246,5 +266,8 @@
   <main>
     {% block content %}{% endblock %}
   </main>
+  <footer class="site-footer">
+    Powered by <a href="https://cannonops.com" target="_blank" rel="noopener">Cannon Ops</a>
+  </footer>
 </body>
 </html>
