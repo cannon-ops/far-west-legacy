@@ -213,6 +213,13 @@ def _output_filename(deceased: dict) -> str:
 
 @app.get("/")
 def index():
+    """Marketing homepage — farwestlegacy.com landing."""
+    return render_template("home.html")
+
+
+@app.get("/tool")
+def tool():
+    """Obituary extraction tool — paste/URL input form."""
     return render_template("index.html")
 
 
