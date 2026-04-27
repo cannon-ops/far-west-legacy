@@ -123,6 +123,16 @@
         if (!d.contains(e.target)) d.open = false;
       });
     });
+    const form = document.querySelector('form[action="/extract"]');
+    if (form) {
+      form.addEventListener('submit', function () {
+        const submitBtn = form.querySelector('button[type="submit"]');
+        if (submitBtn) {
+          submitBtn.disabled = true;
+          submitBtn.textContent = 'Extracting…';
+        }
+      });
+    }
   })();
 </script>
 {% endblock %}
