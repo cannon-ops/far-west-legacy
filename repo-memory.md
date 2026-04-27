@@ -32,15 +32,12 @@ Three-tier setup:
 - **Run Flask:** `python -m src.app` (binds to `0.0.0.0:8081`)
 - **Primary code-editing environment.** All commits originate here.
 
-### Demo / Local — MacBook Air (`Joels-MacBook-Air`)
-- **Tailscale IP:** `100.68.44.127:8081`
-- **Path:** `~/projects/far-west-legacy` (lowercase `projects` on disk)
-- **Service:** launchd user-agent `com.farwestlegacy.app`
-  - Plist: `~/Library/LaunchAgents/com.farwestlegacy.app.plist`
-  - Logs: `~/Library/Logs/far-west-legacy/flask.{log,err}`
-  - Install: `./deploy/install_mac.sh` — Uninstall: `./deploy/uninstall_mac.sh`
-- **Dev mode:** `./start_mac.sh` stops launchd, runs Flask in foreground with `debug=True`, restores launchd on exit.
-- **Demo samples:** `demo/sample_*.txt` (synthetic / anonymized).
+### ~~Demo / Local — MacBook Air~~ (DEPRECATED 2026-04-26)
+- **Status:** No longer the demo platform. Production demo is at `farwestlegacy.com` (Render). Dev and tests run on the Dell.
+- **Files kept for reference, not deleted:** `start_mac.sh`, `copy_sample_mac.sh`, `deploy/install_mac.sh`, `deploy/uninstall_mac.sh`, `deploy/com.farwestlegacy.app.plist`, `deploy/README.md`. These are unmaintained — do not assume they reflect current behavior.
+- **Historical notes (in case the MacBook is revived):**
+  - Tailscale IP `100.68.44.127:8081`, path `~/projects/far-west-legacy` (lowercase), launchd service `com.farwestlegacy.app`, logs `~/Library/Logs/far-west-legacy/flask.{log,err}`.
+- **Demo samples:** `demo/sample_*.txt` (synthetic / anonymized) — still used for local dev on the Dell and as paste-in fodder for production demos.
 
 ### Production — farwestlegacy.com
 - **Domain registrar:** Cloudflare (TODO: confirm — likely DNS-only proxied to Render)

@@ -26,20 +26,9 @@ Standing rules for Claude Code (Agent 13) sessions.
 
 ## Demo Environment
 
-- **Demo machine:** MacBook Air (Joels-MacBook-Air)
-- **Path:** `~/projects/far-west-legacy` (note: lowercase `projects` on disk)
-- **Port:** 8081 (set via `FLASK_PORT` env var)
-- **Browser:** Chrome (system default)
-- **Deployment:** launchd user-level service (see `deploy/README.md`)
-  - Service label: `com.farwestlegacy.app`
-  - Plist: `~/Library/LaunchAgents/com.farwestlegacy.app.plist`
-  - Logs: `~/Library/Logs/far-west-legacy/flask.{log,err}`
-  - Install:   `./deploy/install_mac.sh`
-  - Uninstall: `./deploy/uninstall_mac.sh`
-- **Scripts (macOS only):**
-  - `./start_mac.sh` — dev mode: foreground Flask with debug=True, auto-restores launchd on exit
-  - `./copy_sample_mac.sh [name]` — list samples or copy one to clipboard
-- **Demo samples:** `demo/sample_*.txt` — synthetic, anonymized obituaries
+- **Demo platform:** Production at `farwestlegacy.com` (Render). Demo from any browser, share the URL with stakeholders.
+- **Demo samples:** `demo/sample_*.txt` — synthetic, anonymized obituaries. Paste into the production tool at `farwestlegacy.com/tool`.
+- **MacBook deploy is deprecated** as of 2026-04-26. The launchd service, `start_mac.sh`, `copy_sample_mac.sh`, and `deploy/*` are kept for reference but are no longer maintained. See `repo-memory.md` Deployment Topology for historical detail.
 
 ## Session Protocol
 
@@ -98,7 +87,10 @@ The FamilySearch Solutions Agreement includes a publicity restriction:
 | `src/extract.py` | `extract_from_text()` — Claude Haiku, returns structured dict, raises `ExtractionError` |
 | `src/fetch.py` | `fetch_obituary_text()` — HTTP GET + BS4 parse, raises `FetchError` |
 | `src/cli.py` | CLI: `--text`, `--file`, `--url`; saves JSON to `output/` |
-| `src/app.py` | Flask app port 8081 (configurable via `FLASK_PORT`): `GET /`, `POST /extract`, `GET /review/<id>`, `POST /approve/<id>` |
+| `src/app.py` | Flask app port 8081 (configurable via `FLASK_PORT`): `GET /` (marketing home), `GET /tool`, `POST /extract`, `GET /review/<id>`, `POST /approve/<id>` |
+| `templates/home.html` | Marketing homepage at `/` (production landing page) |
+| `render.yaml` | Render Blueprint — defines the production web service for `farwestlegacy.com` |
+| `NOTES.md` | Tech-debt notes (cross-referenced in `repo-memory.md` Known Issues) |
 | `prompts/obituary_extract.md` | System prompt for Haiku; defines schema + field rules |
 | `docs/data_schema.md` | Full JSON schema reference |
 | `ARCHITECTURE.md` | Data flow diagram, input channels, FamilySearch integration plan |
@@ -106,8 +98,9 @@ The FamilySearch Solutions Agreement includes a publicity restriction:
 | `repo-memory.md` | Single source of truth for current state (sessions, bugs, decisions, stakeholders). Updated every session close. |
 | `scripts/begin.sh` / `scripts/begin.ps1` | Session-start: prints git status, last commit, test summary, last 30 lines of repo-memory.md |
 | `scripts/close.sh` / `scripts/close.ps1` | Session-end: runs tests, prints git status, reminds to update repo-memory.md and CHANGELOG.md |
-| `start_mac.sh` | macOS dev-mode Flask launcher (stops launchd, runs foreground with debug, restores launchd on exit) |
-| `copy_sample_mac.sh` | macOS demo helper: list `demo/sample_*.txt` or copy one to clipboard via `pbcopy` |
+| `start_mac.sh` | _(deprecated 2026-04-26)_ macOS dev-mode Flask launcher — kept for reference, no longer maintained |
+| `copy_sample_mac.sh` | _(deprecated 2026-04-26)_ macOS demo clipboard helper — kept for reference, no longer maintained |
+| `deploy/` | _(deprecated 2026-04-26)_ MacBook launchd install/uninstall scripts and plist — kept for reference, no longer maintained |
 
 ## Architecture
 
@@ -150,11 +143,12 @@ FAMILYSEARCH API  [future — sandbox first]
 
 ## Deployment
 
-Three-tier setup:
+Two-tier setup:
 
-- **Dev (Dell Optiplex 3060, Windows)** — primary code-editing environment. All commits originate here. Flask runs on `0.0.0.0:8081` via `python -m src.app`.
-- **Demo / Local (MacBook Air)** — launchd service `com.farwestlegacy.app` on port 8081. Reachable over Tailscale at `100.68.44.127:8081`. Used for live demos.
-- **Production (farwestlegacy.com)** — public-facing instance. Hosting platform / deploy process recorded in `repo-memory.md` (TODO until confirmed).
+- **Dev (Dell Optiplex 3060, Windows)** — primary code-editing and test environment. All commits originate here. Flask runs on `0.0.0.0:8081` via `python -m src.app`.
+- **Production (farwestlegacy.com)** — Render web service, free plan, Oregon. Blueprint at `render.yaml`. Auto-deploys on push to `main`. Marketing homepage at `/`, extraction tool at `/tool`. Also serves as the demo platform — share the URL with stakeholders.
+
+The MacBook demo workflow (`start_mac.sh`, `copy_sample_mac.sh`, `deploy/install_mac.sh`, launchd service `com.farwestlegacy.app`) is **deprecated** as of 2026-04-26. Files kept for reference but unmaintained.
 
 Details, deploy commands, and access notes live in `repo-memory.md`.
 
