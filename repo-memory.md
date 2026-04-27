@@ -7,7 +7,7 @@ Single source of truth for current state. Update before every session close.
 ## Current State
 
 - **Branch:** `main`
-- **Last commit:** `27a0389` — Session 004: launchd deploy + dev-mode coexistence
+- **Last commit (pre-handoff base):** `0401c6b` — Subtle 'Powered by Cannon Ops' footer on every page
 - **Tests:** 30 passed, 3 skipped (network integration tests, gated by `RUN_NETWORK_TESTS=1`)
 - **Milestone:** 1 complete (extract + fetch + CLI + Flask review UI). Milestone 2 not yet started.
 - **What works right now:**
@@ -43,11 +43,17 @@ Three-tier setup:
 - **Demo samples:** `demo/sample_*.txt` (synthetic / anonymized).
 
 ### Production — farwestlegacy.com
-- **Domain registrar:** Cloudflare (TODO: confirm — may also be DNS-only and proxied)
-- **Hosting platform:** TODO — confirm where the live site is hosted (Render? Fly.io? a VPS? Cloudflare Pages?)
-- **Deployment process:** TODO — document the actual push-to-deploy or manual-deploy workflow used during conference setup
-- **Access / credentials:** TODO — record who has push/deploy access and where credentials live
+- **Domain registrar:** Cloudflare (TODO: confirm — likely DNS-only proxied to Render)
+- **Hosting platform:** **Render** (free plan, Oregon region). Configured via `render.yaml` Blueprint at repo root.
+  - Service name: `far-west-legacy`, runtime `python`, branch `main`, `autoDeploy: true`
+  - Start command: `gunicorn -w 2 -b 0.0.0.0:$PORT src.app:app`
+  - Build command: `pip install -r requirements.txt`
+  - Health check: `/`
+- **Deployment process:** push to `main` → Render auto-deploys. Marketing homepage at `/`, tool at `/tool`.
+- **Env vars on Render:** `PYTHON_VERSION=3.12.4`, `FLASK_ENV=production`, `ANTHROPIC_API_KEY` (set in Render dashboard, never committed). TODO: confirm `FAMILYSEARCH_*` vars and `FLASK_SECRET_KEY` are set when needed.
+- **Access / credentials:** TODO — record who has Render dashboard access and where the account credentials live.
 - **Status:** Live and demoed publicly at the AI+Genealogy seminar. No longer a "personal project" — graduating to product with stakeholders.
+- **Filesystem caveat:** Render free-tier filesystem is ephemeral — `tmp/` and `output/` reset on every container restart. Fine for single-user demos; needs durable storage (S3 / Render Disk) before any library-partner rollout.
 
 ---
 
@@ -70,7 +76,8 @@ Three-tier setup:
 - **003 / 003a (2026-04-18)** — MacBook demo scripts (`start_mac.sh`, `copy_sample_mac.sh`); Flask bound to `0.0.0.0` for Tailnet access; demo samples added.
 - **004 (2026-04-18)** — launchd deployment for the MacBook (`com.farwestlegacy.app`); dev-mode coexistence; deploy/install_mac.sh + uninstall_mac.sh + README.
 - **001 close (rolled into FWL 001 wrap-up)** — Conference deployment to `farwestlegacy.com`; live demo at the Mid-West Genealogy Center AI+Genealogy seminar; Katie Smith collaboration interest captured; Matthew Johnson lead captured.
-- **002 (2026-04-26)** — Session handoff infrastructure: this `repo-memory.md`; `scripts/begin.{sh,ps1}` and `scripts/close.{sh,ps1}`; CLAUDE.md cleanup (port 8081, beta env, deployment + stakeholders + handoff sections); production awareness.
+- **Render deploy + marketing homepage (origin commits 4788264, 636a774, f1ffb76, 0401c6b — landed 2026-04-26 by parallel cowork stream):** added `render.yaml` Blueprint, marketing `templates/home.html` at `/` with `/tool` for the app, "Powered by Cannon Ops" footer in `templates/base.html`, `requirements.txt` gained `gunicorn`, and `NOTES.md` documents tech debt (see Known Issues).
+- **002 (2026-04-26)** — Session handoff infrastructure: this `repo-memory.md`; `scripts/begin.{sh,ps1}` and `scripts/close.{sh,ps1}`; CLAUDE.md cleanup (port 8081, beta env, deployment + stakeholders + handoff sections); production awareness. Rebased onto the parallel Render-deploy commits before push.
 
 ---
 
@@ -101,7 +108,11 @@ Three-tier setup:
 
 ## Known Issues
 
-(none recorded — populate as discovered)
+Sourced from `NOTES.md` (committed 2026-04-26 in the Render-deploy stream). Pick up next time we're in this repo — flagged but not fixed in current session.
+
+- **`src/app.py` is duplicated end-to-end** — file contains its entire body twice (~333 lines). Python silently lets the second definition replace the first on import, so the app runs, but it's confusing and a future edit to the wrong copy will look like a no-op. The 2026-04-26 deploy work modified the *second* copy of `def index()` (the live one) to render `home.html` and added a new `/tool` route. Clean up before any meaningful edit to `app.py`.
+- **`src/app.py` hardcoded `secret_key`** — `app.secret_key = "dev-secret-change-in-prod"` is committed. App doesn't currently use sessions/flash, so not exploitable today, but move to `os.environ.get("FLASK_SECRET_KEY", ...)` and set `FLASK_SECRET_KEY` on Render before relying on session-based features.
+- **Render free-tier filesystem is ephemeral** — `tmp/` and `output/` reset on every container restart. Not urgent while single-user, but must persist to durable storage (S3 / Render Disk) before any "share with library partners" rollout.
 
 ---
 
@@ -116,7 +127,10 @@ All set in `.env` at repo root (template: `.env.example`). Never committed.
 | `FAMILYSEARCH_CLIENT_SECRET` | FamilySearch OAuth client secret. |
 | `FAMILYSEARCH_REDIRECT_URI` | OAuth callback URL. Beta is registered for `http://localhost:8081/callback` and the `farwestlegacy.com` realm. |
 | `FAMILYSEARCH_ENV` | `beta` for development (was `integration` in template — beta is the correct value now). |
-| `FLASK_PORT` | Flask bind port. Defaults to `8081`. |
+| `FLASK_PORT` | Flask bind port. Defaults to `8081`. (Production on Render uses `$PORT` from gunicorn, not `FLASK_PORT`.) |
+| `FLASK_ENV` | Set to `production` on Render. Unset locally. |
+| `PYTHON_VERSION` | Render-only: `3.12.4`. |
+| `FLASK_SECRET_KEY` | Not yet wired up — `src/app.py` still hardcodes `"dev-secret-change-in-prod"`. See Known Issues. |
 
 ---
 
@@ -125,5 +139,5 @@ All set in `.env` at repo root (template: `.env.example`). Never committed.
 - **Anthropic API** — Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) for text extraction. `max_tokens=4096`. Sonnet planned for vision/photo OCR (Milestone 3).
 - **FamilySearch beta** — AppKey `b00T623K88QL2ZON6BEF`. Registered redirect URI `http://localhost:8081/callback`. `farwestlegacy.com` realm registered. Compatibility Review required before production.
 - **Domain registrar** — Cloudflare (`farwestlegacy.com`).
-- **Hosting platform (production)** — TODO: confirm where farwestlegacy.com is actually hosted and document the deploy path.
+- **Hosting platform (production)** — **Render** (free plan, Oregon). Blueprint: `render.yaml`. Auto-deploys on push to `main`. Service: `far-west-legacy`. Runs `gunicorn -w 2 -b 0.0.0.0:$PORT src.app:app`.
 - **Tailscale** — used for MacBook demo access from Dell (`100.68.44.127:8081`).

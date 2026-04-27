@@ -28,8 +28,12 @@ Format: session number, date, milestone label, summary of changes.
 - 30 passed, 3 skipped (no regressions)
 
 ### Flagged TODOs
-- `repo-memory.md` Production section: hosting platform, deployment process, and access list are placeholders pending confirmation.
+- `repo-memory.md` Production section: hosting platform = Render confirmed; deploy details captured. Remaining TODOs: confirm Cloudflare-vs-Render DNS arrangement, record who has Render dashboard access, confirm `FAMILYSEARCH_*` and `FLASK_SECRET_KEY` are set on Render.
 - URL-fetching bug needs a reproduction case captured in the next session.
+- Tech debt items inherited from `NOTES.md` (`src/app.py` duplication, hardcoded `secret_key`, ephemeral Render filesystem) are now cross-referenced in `repo-memory.md` Known Issues.
+
+### Integration note
+- Rebased onto parallel cowork commits that landed on `origin/main` mid-session: `4788264` (Render deploy + marketing homepage), `636a774` (merge), `f1ffb76` (NOTES.md tech debt), `0401c6b` (Powered-by-Cannon-Ops footer). No conflicts; tests still 30 passed / 3 skipped after rebase. `repo-memory.md` updated to reflect the integrated state.
 
 ---
 
