@@ -5,6 +5,32 @@ Format: session number, date, milestone label, summary of changes.
 
 ---
 
+## Session 005 (2026-04-27) — Version Banner + Release Notes + Logs Modal
+
+**Version: 0.5.0**
+
+- Added `APP_VERSION` constant and `src/version.py` module
+- Footer now shows clickable `v0.5.0` and `Logs` buttons (replaces plain "Powered by Cannon Ops" line)
+- Clicking version opens release notes modal with bundled `CHANGELOG.md` (read once at startup)
+- Clicking Logs opens tabbed modal: **App** (last 200 log records via in-memory ring buffer) and **Activity** (last 50 user actions: extract_ok / extract_error)
+- Activity hooks wired into `/extract` route across all four branches (success, FetchError, ExtractionError, ValidationError on empty input)
+- New routes: `GET /changelog`, `GET /logs`
+- Logging: ring-buffer handler attached to `werkzeug` and `src` loggers with `propagate=False` to avoid duplicate emissions
+- UI fix: tightened whitespace between caption box and Extract button (`.form-actions` margin reduced from 1.5rem + 1rem padding + border to 0.75rem clean)
+
+---
+
+## Session 004 (2026-04-27) — Demo Polish
+
+- Sample obituary dropdown moved to textarea label-right, removed auto-submit (commit `ec6f48a`)
+- Extract button shows loading state on submit (commit `642bd3c`)
+- "Start Over" and "Extract Another Obituary" routes corrected to `/tool` (commit `8fd25ab`)
+- Disabled-button repaint via double `requestAnimationFrame`; sample dropdown locked during extraction (commit `ab14969`)
+- `cursor: not-allowed` on disabled primary button (commit `002b421`)
+- Tricounty URL fetch bug (name extracted but no facts) DEFERRED to future session
+
+---
+
 ## Session 003 (2026-04-27) — Website Wording + Render Auto-Deploy Fix
 
 **Note on session numbering:** this is FWL 003 dated 2026-04-27.

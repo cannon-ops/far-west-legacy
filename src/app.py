@@ -10,9 +10,12 @@ Routes:
 """
 
 import json
+import logging
 import os
 import sys
 import uuid
+from collections import deque
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Allow `python src/app.py` (script mode) in addition to `python -m src.app`
@@ -20,10 +23,11 @@ _project_root = Path(__file__).parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from flask import Flask, redirect, render_template, request, url_for
+from flask import Flask, jsonify, redirect, render_template, request, url_for
 
 from src.extract import ExtractionError, extract_from_text
 from src.fetch import FetchError, fetch_obituary_text
+from src.version import APP_VERSION, CHANGELOG_TEXT
 
 app = Flask(__name__, template_folder="../templates")
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-in-prod")
@@ -31,6 +35,56 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-in-prod")
 BASE_DIR = Path(__file__).parent.parent
 TMP_DIR = BASE_DIR / "tmp"
 OUTPUT_DIR = BASE_DIR / "output"
+
+# ---------------------------------------------------------------------------
+# In-memory log buffers (FWL 005)
+# Both reset on process restart; matches Render free-tier reality.
+# ---------------------------------------------------------------------------
+APP_LOG_BUFFER: deque = deque(maxlen=200)
+ACTIVITY_LOG: list = []
+ACTIVITY_LOG_MAX = 50
+
+
+class RingBufferHandler(logging.Handler):
+    """logging.Handler that appends formatted records to APP_LOG_BUFFER."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            APP_LOG_BUFFER.append({
+                "ts": datetime.fromtimestamp(record.created, tz=timezone.utc).isoformat(),
+                "level": record.levelname,
+                "logger": record.name,
+                "msg": self.format(record),
+            })
+        except Exception:
+            self.handleError(record)
+
+
+_ring_handler = RingBufferHandler()
+_ring_handler.setFormatter(logging.Formatter("%(message)s"))
+_ring_handler.setLevel(logging.INFO)
+
+# Attach to Werkzeug + src loggers; disable propagation to avoid duplicates
+for _logger_name in ("werkzeug", "src"):
+    _l = logging.getLogger(_logger_name)
+    _l.addHandler(_ring_handler)
+    _l.propagate = False
+    if _l.level == logging.NOTSET or _l.level > logging.INFO:
+        _l.setLevel(logging.INFO)
+
+app.logger.addHandler(_ring_handler)
+app.logger.propagate = False
+app.logger.setLevel(logging.INFO)
+
+
+def record_activity(event: str, **details) -> None:
+    """Append a user-activity record to ACTIVITY_LOG (newest first)."""
+    ACTIVITY_LOG.insert(0, {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "event": event,
+        "details": details,
+    })
+    del ACTIVITY_LOG[ACTIVITY_LOG_MAX:]
 
 
 def _tmp_path(job_id: str) -> Path:
@@ -71,16 +125,19 @@ def extract():
             obituary_text = fetch_obituary_text(source_url)
         except FetchError as exc:
             error = f"Could not fetch URL: {exc}"
+            record_activity("extract_error", error_type="FetchError", message=str(exc))
             return render_template("index.html", error=error, source_url=source_url)
 
     if not obituary_text:
         error = "Please paste obituary text or provide a URL."
+        record_activity("extract_error", error_type="ValidationError", message="missing input")
         return render_template("index.html", error=error)
 
     try:
         result = extract_from_text(obituary_text, source_url=source_url)
     except ExtractionError as exc:
         error = f"Extraction failed: {exc}"
+        record_activity("extract_error", error_type="ExtractionError", message=str(exc))
         return render_template(
             "index.html",
             error=error,
@@ -92,6 +149,7 @@ def extract():
     TMP_DIR.mkdir(exist_ok=True)
     _tmp_path(job_id).write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
 
+    record_activity("extract_ok", job_id=job_id, source=("url" if source_url else "paste"))
     return redirect(url_for("review", job_id=job_id))
 
 
@@ -169,6 +227,28 @@ def approve(job_id: str):
     tmp.unlink(missing_ok=True)
 
     return render_template("confirmed.html", filename=filename, out_path=str(out_path), data=result)
+
+
+# ---------------------------------------------------------------------------
+# FWL 005 routes: version banner + logs modal
+# ---------------------------------------------------------------------------
+
+@app.context_processor
+def inject_version():
+    return {"app_version": APP_VERSION}
+
+
+@app.route("/changelog")
+def changelog():
+    return jsonify({"version": APP_VERSION, "markdown": CHANGELOG_TEXT})
+
+
+@app.route("/logs")
+def logs():
+    return jsonify({
+        "app": list(APP_LOG_BUFFER),
+        "activity": ACTIVITY_LOG,
+    })
 
 
 if __name__ == "__main__":

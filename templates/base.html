@@ -215,9 +215,7 @@
       display: flex;
       gap: 1rem;
       align-items: center;
-      margin-top: 1.5rem;
-      padding-top: 1rem;
-      border-top: 1px solid var(--border);
+      margin-top: 0.75rem;
     }
 
     .confirmed-box {
@@ -272,8 +270,195 @@
     {% block content %}{% endblock %}
   </main>
   <footer class="site-footer">
-    Powered by <a href="https://cannonops.com" target="_blank" rel="noopener">Cannon Ops</a><br>
+    Powered by <a href="https://cannonops.com" target="_blank" rel="noopener">Cannon Ops</a>
+    &middot;
+    <button type="button" class="footer-link" id="version-btn" aria-label="Show release notes">v{{ app_version }}</button>
+    &middot;
+    <button type="button" class="footer-link" id="logs-btn" aria-label="Show logs">Logs</button>
+    <br>
     Uses the FamilySearch API. FamilySearch is a trademark of Intellectual Reserve, Inc.
   </footer>
+
+  <!-- FWL 005: Release notes + logs modal -->
+  <div class="fwl-modal" id="fwl-modal" hidden>
+    <div class="fwl-modal-backdrop" data-close></div>
+    <div class="fwl-modal-panel" role="dialog" aria-modal="true" aria-labelledby="fwl-modal-title">
+      <div class="fwl-modal-header">
+        <h2 id="fwl-modal-title">Release Notes</h2>
+        <button type="button" class="fwl-modal-close" data-close aria-label="Close">&times;</button>
+      </div>
+      <div class="fwl-modal-tabs" id="fwl-modal-tabs" hidden>
+        <button type="button" class="fwl-tab is-active" data-tab="app">App</button>
+        <button type="button" class="fwl-tab" data-tab="activity">Activity</button>
+      </div>
+      <div class="fwl-modal-body" id="fwl-modal-body">Loading&hellip;</div>
+    </div>
+  </div>
+
+  <style>
+    .footer-link {
+      background: none;
+      border: none;
+      padding: 0;
+      color: inherit;
+      text-decoration: underline;
+      cursor: pointer;
+      font: inherit;
+    }
+    .footer-link:hover { color: var(--accent, #002B5F); }
+
+    .fwl-modal[hidden] { display: none; }
+    .fwl-modal {
+      position: fixed; inset: 0; z-index: 1000;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .fwl-modal-backdrop {
+      position: absolute; inset: 0;
+      background: rgba(0,0,0,0.5);
+    }
+    .fwl-modal-panel {
+      position: relative;
+      background: #fff;
+      width: min(720px, 92vw);
+      max-height: 80vh;
+      border-radius: 8px;
+      display: flex; flex-direction: column;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+    }
+    .fwl-modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .fwl-modal-header h2 { margin: 0; font-size: 1.1rem; }
+    .fwl-modal-close {
+      background: none; border: none;
+      font-size: 1.5rem; line-height: 1;
+      cursor: pointer; color: #6b7280;
+    }
+    .fwl-modal-tabs {
+      display: flex; gap: 0;
+      border-bottom: 1px solid #e5e7eb;
+      padding: 0 1.25rem;
+    }
+    .fwl-tab {
+      background: none; border: none;
+      padding: 0.625rem 1rem;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      color: #6b7280; font: inherit;
+    }
+    .fwl-tab.is-active {
+      color: #002B5F;
+      border-bottom-color: #002B5F;
+    }
+    .fwl-modal-body {
+      padding: 1.25rem;
+      overflow-y: auto;
+      font-size: 0.9rem;
+      line-height: 1.5;
+    }
+    .fwl-modal-body pre {
+      background: #f3f4f6;
+      padding: 0.75rem;
+      border-radius: 4px;
+      overflow-x: auto;
+      font-size: 0.78rem;
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .fwl-modal-body h1, .fwl-modal-body h2, .fwl-modal-body h3 {
+      margin-top: 1rem; margin-bottom: 0.4rem;
+    }
+    .fwl-modal-body h1:first-child { margin-top: 0; }
+  </style>
+
+  <script>
+    (function () {
+      const modal = document.getElementById("fwl-modal");
+      const title = document.getElementById("fwl-modal-title");
+      const body = document.getElementById("fwl-modal-body");
+      const tabsBar = document.getElementById("fwl-modal-tabs");
+      const versionBtn = document.getElementById("version-btn");
+      const logsBtn = document.getElementById("logs-btn");
+      let logsCache = null;
+
+      function open() { modal.hidden = false; }
+      function close() { modal.hidden = true; }
+
+      modal.addEventListener("click", function (e) {
+        if (e.target.dataset && e.target.dataset.close !== undefined) close();
+      });
+      document.addEventListener("keydown", function (e) {
+        if (e.key === "Escape" && !modal.hidden) close();
+      });
+
+      // Minimal markdown -> HTML (headings + paragraphs + code fences)
+      function renderMarkdown(md) {
+        const escaped = md
+          .replace(/&/g, "&amp;")
+          .replace(/</g, "&lt;")
+          .replace(/>/g, "&gt;");
+        return "<pre>" + escaped + "</pre>";
+      }
+
+      versionBtn.addEventListener("click", function () {
+        title.textContent = "Release Notes";
+        tabsBar.hidden = true;
+        body.textContent = "Loading…";
+        open();
+        fetch("/changelog")
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            const v = data.version || "";
+            title.textContent = "Release Notes — v" + v;
+            body.innerHTML = renderMarkdown(data.markdown || "(no changelog)");
+          })
+          .catch(function () { body.textContent = "Failed to load changelog."; });
+      });
+
+      function renderLogs(activeTab) {
+        const items = activeTab === "activity" ? logsCache.activity : logsCache.app;
+        if (!items || items.length === 0) {
+          body.innerHTML = "<p><em>No entries.</em></p>";
+          return;
+        }
+        const lines = items.map(function (item) {
+          if (activeTab === "activity") {
+            return item.ts + "  " + item.event + "  " + JSON.stringify(item.details || {});
+          }
+          return item.ts + "  [" + item.level + "] " + item.logger + ": " + item.msg;
+        });
+        body.innerHTML = "<pre>" + lines.join("\n").replace(/&/g, "&amp;").replace(/</g, "&lt;") + "</pre>";
+      }
+
+      tabsBar.addEventListener("click", function (e) {
+        const btn = e.target.closest(".fwl-tab");
+        if (!btn) return;
+        Array.prototype.forEach.call(tabsBar.querySelectorAll(".fwl-tab"), function (t) {
+          t.classList.toggle("is-active", t === btn);
+        });
+        renderLogs(btn.dataset.tab);
+      });
+
+      logsBtn.addEventListener("click", function () {
+        title.textContent = "Logs";
+        tabsBar.hidden = false;
+        body.textContent = "Loading…";
+        Array.prototype.forEach.call(tabsBar.querySelectorAll(".fwl-tab"), function (t) {
+          t.classList.toggle("is-active", t.dataset.tab === "app");
+        });
+        open();
+        fetch("/logs")
+          .then(function (r) { return r.json(); })
+          .then(function (data) {
+            logsCache = data;
+            renderLogs("app");
+          })
+          .catch(function () { body.textContent = "Failed to load logs."; });
+      });
+    })();
+  </script>
 </body>
 </html>
