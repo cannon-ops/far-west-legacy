@@ -40,6 +40,14 @@
 
     <div class="form-actions">
       <button type="submit" class="btn btn-primary">Extract &rarr;</button>
+      <details class="sample-dropdown">
+        <summary>Try a sample &#x25BE;</summary>
+        <div class="sample-menu" role="menu">
+          <button type="button" data-sample="neese" role="menuitem">Donna Neese</button>
+          <button type="button" data-sample="veteran" role="menuitem">Harold Whitaker (Veteran)</button>
+          <button type="button" data-sample="amish" role="menuitem">Ada Miller (Amish)</button>
+        </div>
+      </details>
       <span style="font-family: sans-serif; font-size: 0.8rem; color: var(--muted);">
         This will call the Claude API (Haiku).
       </span>
@@ -47,4 +55,74 @@
 
   </form>
 </div>
+
+<style>
+  .sample-dropdown { position: relative; display: inline-block; font-family: sans-serif; }
+  .sample-dropdown > summary {
+    list-style: none;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 0.85rem;
+    padding: 0.4rem 0.65rem;
+    border-radius: 4px;
+    user-select: none;
+  }
+  .sample-dropdown > summary::-webkit-details-marker { display: none; }
+  .sample-dropdown > summary::marker { content: ""; }
+  .sample-dropdown > summary:hover { color: var(--text, #222); background: var(--border, #eee); }
+  .sample-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 0.25rem;
+    background: #fff;
+    border: 1px solid var(--border, #ddd);
+    border-radius: 4px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    min-width: 230px;
+    z-index: 10;
+    padding: 0.25rem 0;
+  }
+  .sample-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0.5rem 0.85rem;
+    font-size: 0.9rem;
+    color: var(--text, #222);
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .sample-menu button:hover { background: var(--border, #f0f0f0); }
+</style>
+
+<script>
+  (function () {
+    const SAMPLES = {
+      neese: `Donna Sue Neese, age 86, a lifelong resident of Jamesport, Missouri, passed away Wednesday morning, December 10, 2025, at Pleasant Valley Manor Care in Pleasant Valley, Missouri. Donna was born July 25, 1939, in Jamesport, the daughter of Andrew and Nellie (Walker) Neese. She graduated from Jamesport High School and spent much of her life helping her brother, Mavis Neese, on the family farm. Donna was a hardworking, gentle soul. Timid by nature, yet deeply caring, she had a special love for children and animals and often took in strays who needed a safe place. Her quiet compassion and steadfast faith in Christ guided her life and touched those around her. Donna will be dearly missed by her family and friends. Donna was preceded in death by her parents; siblings, Mavis Neese, Melvin Neese, Marion Neese, and Allen Hunt; a niece, Elizabeth Ann Hunt; a great-nephew, Cingen James Hunt; and a nephew, Todd Hunt.`,
+      veteran: `Harold Dean Whitaker, age 82, of Gallatin, Missouri, passed away Saturday evening, March 8, 2026, at his home surrounded by family. Harold was born February 14, 1944, in Gallatin, the son of Raymond and Dorothy (Sims) Whitaker. He graduated from Gallatin High School in 1962 and enlisted in the United States Army, serving two tours in Vietnam with the 25th Infantry Division. He was awarded the Bronze Star and Purple Heart. On June 5, 1966, he married Patricia Ann Miller in Gallatin. She survives of the home. Harold worked as a heavy equipment operator for MoDOT for 32 years, retiring in 1998. He was a member of First Baptist Church of Gallatin, the VFW Post 3108, and the Gallatin Masonic Lodge. He loved fishing at Smithville Lake, woodworking, and spoiling his grandchildren. Harold is survived by his wife, Patricia; four children, Steven Whitaker and wife Karen of Gallatin, Michael Whitaker and wife Donna of Cameron, Brenda Carlisle and husband Jim of Chillicothe, and Lisa Morgan and husband David of Kansas City; twelve grandchildren; eight great-grandchildren; and a sister, Carolyn Foster of Trenton. He was preceded in death by his parents; a brother, Kenneth Whitaker; and a grandson, Tyler Carlisle. Funeral services will be held at 10:00 a.m. Wednesday, March 12, 2026, at First Baptist Church with Pastor Bill Henderson officiating. Burial with military honors will follow at the Missouri Veterans Cemetery in Higginsville, Missouri. Visitation will be Tuesday from 6:00 to 8:00 p.m. at Stith Funeral Home in Gallatin. Memorial contributions may be made to the VFW Post 3108 Scholarship Fund.`,
+      amish: `Ada Mae (Yoder) Miller, age 74 years, 3 months and 12 days, of Jamesport, Missouri, passed away peacefully at her home on Wednesday, February 19, 2026, surrounded by her family. Ada was born November 7, 1951, in Holmes County, Ohio, the daughter of Eli J. and Fannie (Troyer) Yoder. On November 15, 1970, she was united in marriage to Amos J. Miller in Holmes County. They moved to the Jamesport community in 1975, where they have resided since. Ada was a devoted member of the Old Order Amish church. She was known throughout the community for her beautiful quilting, her abundant garden, and her generous spirit. She loved hosting church services in her home and could always be counted on to help a neighbor in need. Ada is survived by her husband, Amos Miller of the home; eight children, Mary Schwartz and husband Daniel of Jamesport, Eli Miller and wife Katie of Jamesport, Fannie Borntrager and husband John of Jamesport, Samuel Miller and wife Ada of Jamesport, Anna Yoder and husband Levi of Seymour, David Miller and wife Sarah of Jamesport, Emma Hershberger and husband Abe of Bremen, Indiana, and Martha Miller of the home; forty-two grandchildren; eleven great-grandchildren; four sisters, Fannie Troyer of Jamesport, Mary Hershberger of Jamesport, Emma Yoder of Holmes County, Ohio, and Katie Schrock of Arthur, Illinois; and two brothers, John Yoder of Jamesport and Daniel Yoder of Jamesport. She was preceded in death by her parents; a son, Jacob Miller, in infancy; a daughter-in-law, Rebecca Miller; a brother, Amos Yoder; and a sister, Sarah Bontrager. Funeral services were held Saturday, February 22, 2026, at the family home. Burial followed in the Amish Community Cemetery near Jamesport.`
+    };
+    document.querySelectorAll('.sample-menu button[data-sample]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        const id = btn.dataset.sample;
+        const ta = document.getElementById('obituary_text');
+        const url = document.getElementById('source_url');
+        if (!ta || !SAMPLES[id]) return;
+        ta.value = SAMPLES[id];
+        if (url) url.value = '';
+        const dd = btn.closest('details');
+        if (dd) dd.open = false;
+        if (ta.form) ta.form.requestSubmit();
+      });
+    });
+    document.addEventListener('click', function (e) {
+      document.querySelectorAll('details.sample-dropdown[open]').forEach(function (d) {
+        if (!d.contains(e.target)) d.open = false;
+      });
+    });
+  })();
+</script>
 {% endblock %}
