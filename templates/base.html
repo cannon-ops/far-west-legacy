@@ -118,6 +118,11 @@
       color: #fff;
     }
     .btn-primary:hover { background: var(--accent-hover); }
+    .btn-primary:disabled,
+    .btn-primary[disabled] {
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
 
     .btn-secondary {
       background: var(--accent-light);
