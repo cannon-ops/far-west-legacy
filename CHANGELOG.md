@@ -5,6 +5,48 @@ Format: session number, date, milestone label, summary of changes.
 
 ---
 
+## Session 003 (2026-04-27) — Website Wording + Render Auto-Deploy Fix
+
+**Note on session numbering:** this is FWL 003 dated 2026-04-27.
+There is a prior "Session 003 / 003a" dated 2026-04-18 (MacBook demo
+scripts, now deprecated). Going forward, session entries carry dates.
+
+### Template edits
+- `templates/home.html`: softened hero subhead — production FS write
+  described as planned once approval is granted, not as current capability.
+- `templates/home.html`: same softening applied to "What it does" paragraph.
+- `templates/base.html`: added FS API attribution + Intellectual Reserve
+  trademark notice to shared footer (visible site-wide on all pages).
+
+### Verification
+- Tests: 30 passed, 3 skipped. No regressions.
+- Live site UAT confirmed all changes visible at `farwestlegacy.com/`
+  and `farwestlegacy.com/tool` after Render deploy.
+
+### Render auto-deploy fix
+- Root cause: Render GitHub App installed on personal `joelcannon`
+  account, not on `cannon-ops` org that owns the repo.
+- Fix: installed Render GitHub App on `cannon-ops` org, single-repo
+  scope (`far-west-legacy` only). Validated by next push auto-deploying.
+
+### Operational additions
+- UptimeRobot monitor ID 802933445: 5-min HTTP(s) ping on
+  `https://farwestlegacy.com/`, alerting `joelcannon@mac.com`.
+  Prevents Render free-tier cold starts between visits.
+
+### Workflow formalized
+- Three-pass discipline (recon → diff → execute) adopted for all
+  Cannon Ops projects. Matches existing Sykes Power workflow.
+
+### LICENSE update
+- Copyright line updated: `Joel Cannon` → `Joel Cannon (Cannon Digital LLC)`
+  for alignment with legal entity declared in CLAUDE.md.
+
+### Commit
+`00f033f` + close commit (repo-memory, CHANGELOG, LICENSE)
+
+---
+
 ## Session 002b — 2026-04-26 — Tech Debt + Render-First Pivot
 
 **Goal:** Burn down the Known Issues surfaced in 002, prepare reproduction material for the URL-fetching P0, and pivot deployment docs to Render-as-demo (Dell-as-dev).

@@ -7,14 +7,14 @@ Single source of truth for current state. Update before every session close.
 ## Current State
 
 - **Branch:** `main`
-- **Last commit (pre-handoff base):** `0401c6b` — Subtle 'Powered by Cannon Ops' footer on every page
+- **Last commit at session close:** `00f033f` — FWL 003: soften hero claim; add FS API attribution to footer
 - **Tests:** 30 passed, 3 skipped (network integration tests, gated by `RUN_NETWORK_TESTS=1`)
 - **Milestone:** 1 complete (extract + fetch + CLI + Flask review UI). Milestone 2 not yet started.
 - **What works right now:**
   - Paste obituary text or supply a `.txt` file → Claude Haiku extracts structured JSON (deceased + relationships + eulogy + service details).
   - Flask review UI on port 8081: paste/URL → extract → editable review form → approve → JSON saved to `output/`.
-  - macOS demo deployment running as launchd service `com.farwestlegacy.app` on the MacBook Air.
-  - Production site live at `farwestlegacy.com`.
+  - Production site live at `farwestlegacy.com` (Render auto-deploy on push to main).
+  - UptimeRobot keep-alive monitor (ID 802933445, 5min ping) prevents Render free-tier cold starts.
 - **What does not work yet:**
   - URL fetching for online obituaries (see Active Bugs).
   - FamilySearch OAuth + writes (Milestone 2 — not started).
@@ -61,7 +61,7 @@ Three-tier setup:
 | Joel Cannon (Cannon Digital LLC) | Owner / Managing Member | Builds, sets direction. Email: chiefcannon26@gmail.com |
 | Daviess County Historical Society | Sponsor | Trudi Burton has **not yet been briefed** on FWL. Pending decision. |
 | Mid-West Genealogy Center (Independence, MO) | Collaboration interest | Director **Katie Smith** raised possible collaboration with potential **rebrand for library patrons**. Scope undefined. |
-| Matthew Johnson | Potential paying customer | Meeting **2026-04-27** about paid acceleration so his archivist team can process obituaries + other family-history docs (pedigree charts, trees). |
+| Matthew Johnson | Potential paying customer (Perfection Image, perfectionimage.com) | Meeting scheduled **2026-04-27** — pre-meeting overview + internal briefing drafted. Outcome to be recorded post-meeting. Tenant ID: `perfection-image`. Possible RootsTech 2027 booth co-host. |
 | FamilySearch / Gordon Clarke | API partner | Beta AppKey issued: `b00T623K88QL2ZON6BEF`. `FAMILYSEARCH_ENV=beta`. Compatibility Review still required before production writes. Contact: clarkegj@churchofjesuschrist.org |
 
 ---
@@ -75,6 +75,8 @@ Three-tier setup:
 - **001 close (rolled into FWL 001 wrap-up)** — Conference deployment to `farwestlegacy.com`; live demo at the Mid-West Genealogy Center AI+Genealogy seminar; Katie Smith collaboration interest captured; Matthew Johnson lead captured.
 - **Render deploy + marketing homepage (origin commits 4788264, 636a774, f1ffb76, 0401c6b — landed 2026-04-26 by parallel cowork stream):** added `render.yaml` Blueprint, marketing `templates/home.html` at `/` with `/tool` for the app, "Powered by Cannon Ops" footer in `templates/base.html`, `requirements.txt` gained `gunicorn`, and `NOTES.md` documents tech debt (see Known Issues).
 - **002 (2026-04-26)** — Session handoff infrastructure: this `repo-memory.md`; `scripts/begin.{sh,ps1}` and `scripts/close.{sh,ps1}`; CLAUDE.md cleanup (port 8081, beta env, deployment + stakeholders + handoff sections); production awareness. Rebased onto the parallel Render-deploy commits before push.
+- **002b (2026-04-26)** — Tech debt + Render-first pivot: `src/app.py` deduplication, `FLASK_SECRET_KEY` env-var support, MacBook demo deprecation, URL fetch failures captured in `tests/fixtures/url_fetch_failures.md`. Commit `f0ce280`.
+- **003 (2026-04-27) — Website Wording + Render Auto-Deploy Fix:** Softened hero claim and "What it does" paragraph in `templates/home.html` to reflect sandbox-only status. Added FS API attribution + Intellectual Reserve trademark notice to footer in `templates/base.html`. Tests: 30 passed, 3 skipped. Diagnosed and fixed Render auto-deploy: GitHub App was installed on personal `joelcannon` account but not on `cannon-ops` org — installed at org level (single-repo scope). UptimeRobot monitor 802933445 created (5-min keep-alive). Three-pass workflow discipline (recon → diff → execute) formalized across all Cannon Ops projects. Note: this FWL 003 (2026-04-27) is distinct from the earlier Session 003/003a (2026-04-18, MacBook demo scripts, now deprecated). Future sessions adopt date-disambiguating labels. Commit `00f033f`.
 
 ---
 
@@ -82,9 +84,9 @@ Three-tier setup:
 
 - **[P0] URL fetching broken for online obituaries.**
   - Symptom: paste a real obituary URL into the Flask UI → fetch fails (or returns garbage).
-  - Reproduction case: TODO — capture a specific failing URL in the next session.
-  - Suspected cause: site changed structure / blocks `requests` user-agent / JS-rendered content. Needs investigation.
-  - Owner: next session.
+  - Reproduction cases: documented in `tests/fixtures/url_fetch_failures.md` — four classes (silent garbage, UA blocking, JS-only rendering, paywalled).
+  - Suspected fix: tiered fetcher (plain requests → UA spoofing → headless browser, opt-in only). Architecture discussion deferred to FWL 005.
+  - Owner: FWL 005.
 
 ---
 
