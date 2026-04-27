@@ -5,6 +5,15 @@ Format: session number, date, milestone label, summary of changes.
 
 ---
 
+## Session 005a (2026-04-27) — Stale Job ID Cleanup
+
+**Version: 0.5.1**
+
+- `/review/<job_id>` and `/approve/<job_id>` (POST) now silently redirect to `/tool` when tmp file is missing, replacing the user-facing "Session expired or job not found" error banner
+- New `/approve/<job_id>` (GET) handler — silent redirect to `/tool` for stale bookmarks / back-button navigation (kills the 405 Method Not Allowed page)
+
+---
+
 ## Session 005 (2026-04-27) — Version Banner + Release Notes + Logs Modal
 
 **Version: 0.5.0**

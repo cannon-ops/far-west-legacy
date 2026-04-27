@@ -157,16 +157,23 @@ def extract():
 def review(job_id: str):
     tmp = _tmp_path(job_id)
     if not tmp.exists():
-        return render_template("index.html", error="Session expired or job not found. Please extract again.")
+        return redirect(url_for("tool"))
     result = json.loads(tmp.read_text(encoding="utf-8"))
     return render_template("review.html", job_id=job_id, data=result)
+
+
+@app.get("/approve/<job_id>")
+def approve_get(job_id: str):
+    """A GET to /approve/<id> means a stale bookmark or back-button.
+    Silently redirect to /tool (kills 405 on cold load of post-confirmed URL)."""
+    return redirect(url_for("tool"))
 
 
 @app.post("/approve/<job_id>")
 def approve(job_id: str):
     tmp = _tmp_path(job_id)
     if not tmp.exists():
-        return render_template("index.html", error="Session expired or job not found.")
+        return redirect(url_for("tool"))
 
     original = json.loads(tmp.read_text(encoding="utf-8"))
 
