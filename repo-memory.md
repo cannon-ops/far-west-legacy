@@ -127,7 +127,7 @@ All set in `.env` at repo root (template: `.env.example`). Never committed.
 | `FLASK_PORT` | Flask bind port. Defaults to `8081`. (Production on Render uses `$PORT` from gunicorn, not `FLASK_PORT`.) |
 | `FLASK_ENV` | Set to `production` on Render. Unset locally. |
 | `PYTHON_VERSION` | Render-only: `3.12.4`. |
-| `FLASK_SECRET_KEY` | Not yet wired up — `src/app.py` still hardcodes `"dev-secret-change-in-prod"`. See Known Issues. |
+| `FLASK_SECRET_KEY` | Wired in `src/app.py` (FWL 002b). REQUIRED on Render in production; falls back to `"dev-secret-change-in-prod"` if unset (fine locally; fine in prod until sessions/flash are introduced). |
 
 ---
 
@@ -137,4 +137,4 @@ All set in `.env` at repo root (template: `.env.example`). Never committed.
 - **FamilySearch beta** — AppKey `b00T623K88QL2ZON6BEF`. Registered redirect URI `http://localhost:8081/callback`. `farwestlegacy.com` realm registered. Compatibility Review required before production.
 - **Domain registrar** — Cloudflare (`farwestlegacy.com`).
 - **Hosting platform (production)** — **Render** (free plan, Oregon). Blueprint: `render.yaml`. Auto-deploys on push to `main`. Service: `far-west-legacy`. Runs `gunicorn -w 2 -b 0.0.0.0:$PORT src.app:app`.
-- **Tailscale** — used for MacBook demo access from Dell (`100.68.44.127:8081`).
+- **Tailscale** — _(formerly used for MacBook demo access; see deprecated section under Deployment Topology)_.

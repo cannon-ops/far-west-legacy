@@ -5,6 +5,32 @@ Format: session number, date, milestone label, summary of changes.
 
 ---
 
+## Session 002b — 2026-04-26 — Tech Debt + Render-First Pivot
+
+**Goal:** Burn down the Known Issues surfaced in 002, prepare reproduction material for the URL-fetching P0, and pivot deployment docs to Render-as-demo (Dell-as-dev).
+
+### Fixed
+- **`src/app.py` deduplication** — file went from 341 lines (two end-to-end copies) to 176 lines (single canonical copy). Marketing routes (`/` → `home.html`, `/tool` → `index.html`) preserved; the duplicated `__main__` block and stale `index()` returning `index.html` are gone. Verified via `app.url_map`: 6 routes register, marketing homepage renders, `/tool` serves the extractor UI. (commit `4388a99`)
+- **`app.secret_key` wired to env var** — `os.getenv("FLASK_SECRET_KEY", "dev-secret-change-in-prod")`. Production action still pending: set `FLASK_SECRET_KEY` in the Render dashboard. (commit `17859ce`)
+- **`.env.example` corrected** — `FAMILYSEARCH_REDIRECT_URI` now `:8081`, `FAMILYSEARCH_ENV=beta` (was `:8080` and `integration`), `FLASK_SECRET_KEY` documented as production-required.
+
+### Added
+- `tests/fixtures/url_fetch_failures.md` — four real-world reproduction cases for the URL-fetching P0 (Tri-County Weekly silent garbage-return, legacy.com 404/JS-only, dignitymemorial.com 403 UA-block, findagrave.com generic chrome). Includes pattern summary and FWL 003 design notes. **Not fixed in 002b — handoff to FWL 003.** (commit `787d0e9`)
+
+### Changed
+- **MacBook demo workflow deprecated.** `repo-memory.md` Deployment Topology now lists Dev=Dell + Production=Render only; MacBook section moved under a "DEPRECATED" heading with historical notes preserved. `CLAUDE.md` Demo Environment + Deployment sections rewritten to reflect Render as the demo platform. `start_mac.sh`, `copy_sample_mac.sh`, `deploy/*` retained on disk for reference but flagged unmaintained. (commit `32809c5`)
+- **`repo-memory.md` Known Issues** — first two items (app.py dedupe, hardcoded secret) struck through and tagged as fixed in 002b; ephemeral filesystem still flagged for pre-rollout work.
+
+### Tests
+- 30 passed, 3 skipped (no regressions across all four commits)
+
+### Flagged TODOs / Handoffs to FWL 003
+- **URL-fetching P0** — reproduction cases captured in `tests/fixtures/url_fetch_failures.md`. Three classes of bug to address: (1) silent garbage-return when no article container is found, (2) bot-hostile User-Agent, (3) JS-rendered pages.
+- **Production env var on Render** — `FLASK_SECRET_KEY` needs to be set in the Render dashboard; until then prod falls back to the dev placeholder (fine because no sessions/flash yet).
+- **Render free-tier ephemeral filesystem** — `tmp/` and `output/` reset on container restart. Persist before any library-partner rollout.
+
+---
+
 ## Session 002 close — 2026-04-26 — Session Handoff Infrastructure
 
 **Goal:** Stand up production-aware session-handoff infrastructure now that FWL is graduating from a personal project to a product with stakeholders (live site, library collaboration interest, paid-customer lead).
