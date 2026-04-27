@@ -125,12 +125,30 @@
     });
     const form = document.querySelector('form[action="/extract"]');
     if (form) {
-      form.addEventListener('submit', function () {
+      form.addEventListener('submit', function (e) {
         const submitBtn = form.querySelector('button[type="submit"]');
-        if (submitBtn) {
-          submitBtn.disabled = true;
-          submitBtn.textContent = 'Extracting…';
+        if (!submitBtn || submitBtn.disabled) return;
+        e.preventDefault();
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Extracting…';
+        // Lock the sample dropdown so it can't be opened or used mid-extraction
+        const sampleDropdown = form.querySelector('details.sample-dropdown')
+          || document.querySelector('details.sample-dropdown');
+        if (sampleDropdown) {
+          sampleDropdown.open = false;
+          const summary = sampleDropdown.querySelector('summary');
+          if (summary) {
+            summary.style.pointerEvents = 'none';
+            summary.style.opacity = '0.5';
+            summary.setAttribute('aria-disabled', 'true');
+          }
         }
+        // Defer submission so browser paints the disabled state before navigating
+        requestAnimationFrame(function () {
+          requestAnimationFrame(function () {
+            form.submit();
+          });
+        });
       });
     }
   })();
