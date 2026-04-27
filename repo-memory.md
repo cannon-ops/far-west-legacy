@@ -110,8 +110,8 @@ Three-tier setup:
 
 Sourced from `NOTES.md` (committed 2026-04-26 in the Render-deploy stream). Pick up next time we're in this repo — flagged but not fixed in current session.
 
-- **`src/app.py` is duplicated end-to-end** — file contains its entire body twice (~333 lines). Python silently lets the second definition replace the first on import, so the app runs, but it's confusing and a future edit to the wrong copy will look like a no-op. The 2026-04-26 deploy work modified the *second* copy of `def index()` (the live one) to render `home.html` and added a new `/tool` route. Clean up before any meaningful edit to `app.py`.
-- **`src/app.py` hardcoded `secret_key`** — `app.secret_key = "dev-secret-change-in-prod"` is committed. App doesn't currently use sessions/flash, so not exploitable today, but move to `os.environ.get("FLASK_SECRET_KEY", ...)` and set `FLASK_SECRET_KEY` on Render before relying on session-based features.
+- **~~`src/app.py` is duplicated end-to-end~~** — **FIXED 2026-04-26 (FWL 002b commit `4388a99`).** File is now a single canonical 176-line module; marketing routes (`/`, `/tool`) preserved.
+- **~~`src/app.py` hardcoded `secret_key`~~** — **FIXED 2026-04-26 (FWL 002b).** `app.secret_key` now reads `os.getenv("FLASK_SECRET_KEY", "dev-secret-change-in-prod")`. **Production action still pending:** set `FLASK_SECRET_KEY` in the Render dashboard. Until then, the prod instance falls back to the dev placeholder — fine until sessions/flash messages are introduced.
 - **Render free-tier filesystem is ephemeral** — `tmp/` and `output/` reset on every container restart. Not urgent while single-user, but must persist to durable storage (S3 / Render Disk) before any "share with library partners" rollout.
 
 ---

@@ -26,7 +26,7 @@ from src.extract import ExtractionError, extract_from_text
 from src.fetch import FetchError, fetch_obituary_text
 
 app = Flask(__name__, template_folder="../templates")
-app.secret_key = "dev-secret-change-in-prod"
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-in-prod")
 
 BASE_DIR = Path(__file__).parent.parent
 TMP_DIR = BASE_DIR / "tmp"
