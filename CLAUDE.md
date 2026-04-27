@@ -13,7 +13,7 @@ Standing rules for Claude Code (Agent 13) sessions.
 ## Stack
 
 - Python 3.12+
-- Flask (web UI, port 8080)
+- Flask (web UI, port 8081)
 - Anthropic Claude API (Haiku for text extraction, Sonnet for vision/photos)
 - FamilySearch REST API (OAuth 2.0)
 - pytest for testing
@@ -52,7 +52,7 @@ Standing rules for Claude Code (Agent 13) sessions.
 
 ## FamilySearch API Rules
 
-1. **Sandbox first.** All development targets `https://integration.familysearch.org`. Never production until Compatibility Review is passed.
+1. **Beta first.** All development targets the FamilySearch **beta** environment (`FAMILYSEARCH_ENV=beta`). Never production until Compatibility Review is passed.
 2. **User review is mandatory.** No FamilySearch write without explicit user confirmation of extracted data.
 3. **Duplicate check before every write.** Search the tree before creating any person.
 4. **Record hints open FamilySearch.org.** Never display full record details in the app (API terms requirement).
@@ -67,7 +67,8 @@ The FamilySearch Solutions Agreement includes a publicity restriction:
 
 ## Secrets & Security
 
-- `.env` at repo root holds all secrets: `ANTHROPIC_API_KEY`, `FAMILYSEARCH_CLIENT_ID`, `FAMILYSEARCH_CLIENT_SECRET`
+- `.env` at repo root holds all secrets: `ANTHROPIC_API_KEY`, `FAMILYSEARCH_CLIENT_ID`, `FAMILYSEARCH_CLIENT_SECRET`, `FAMILYSEARCH_REDIRECT_URI`, `FAMILYSEARCH_ENV`
+- The current beta `FAMILYSEARCH_CLIENT_ID` (AppKey) lives in `.env`. Treat it like a credential — never paste into commits, prompts, or PRs.
 - Never commit `.env`, `service_account.json`, or any credentials.
 - `.env.example` is the template — committed, no real values.
 - BYOK model: users supply their own Anthropic API key.
@@ -84,7 +85,7 @@ The FamilySearch Solutions Agreement includes a publicity restriction:
   - `src/extract.py` — Claude Haiku extraction (`max_tokens=4096`)
   - `src/fetch.py` — URL fetch + BeautifulSoup parse
   - `src/cli.py` — `--text / --file / --url` CLI
-  - `src/app.py` — Flask UI on port 8080 (paste → extract → review → approve)
+  - `src/app.py` — Flask UI on port 8081 (paste → extract → review → approve)
   - `demo/` — synthetic demo obituaries (neese, veteran, amish)
   - `start_mac.sh`, `copy_sample_mac.sh` — macOS demo scripts
 - **Milestone 2 (next):** FamilySearch OAuth + sandbox writes
@@ -97,11 +98,16 @@ The FamilySearch Solutions Agreement includes a publicity restriction:
 | `src/extract.py` | `extract_from_text()` — Claude Haiku, returns structured dict, raises `ExtractionError` |
 | `src/fetch.py` | `fetch_obituary_text()` — HTTP GET + BS4 parse, raises `FetchError` |
 | `src/cli.py` | CLI: `--text`, `--file`, `--url`; saves JSON to `output/` |
-| `src/app.py` | Flask app port 8080: `GET /`, `POST /extract`, `GET /review/<id>`, `POST /approve/<id>` |
+| `src/app.py` | Flask app port 8081 (configurable via `FLASK_PORT`): `GET /`, `POST /extract`, `GET /review/<id>`, `POST /approve/<id>` |
 | `prompts/obituary_extract.md` | System prompt for Haiku; defines schema + field rules |
 | `docs/data_schema.md` | Full JSON schema reference |
 | `ARCHITECTURE.md` | Data flow diagram, input channels, FamilySearch integration plan |
 | `CHANGELOG.md` | Per-session change log |
+| `repo-memory.md` | Single source of truth for current state (sessions, bugs, decisions, stakeholders). Updated every session close. |
+| `scripts/begin.sh` / `scripts/begin.ps1` | Session-start: prints git status, last commit, test summary, last 30 lines of repo-memory.md |
+| `scripts/close.sh` / `scripts/close.ps1` | Session-end: runs tests, prints git status, reminds to update repo-memory.md and CHANGELOG.md |
+| `start_mac.sh` | macOS dev-mode Flask launcher (stops launchd, runs foreground with debug, restores launchd on exit) |
+| `copy_sample_mac.sh` | macOS demo helper: list `demo/sample_*.txt` or copy one to clipboard via `pbcopy` |
 
 ## Architecture
 
@@ -129,7 +135,7 @@ EXTRACTION  (Claude Haiku, max_tokens=4096)
         "raw_text": "..."
       }
 
-REVIEW UI  (Flask port 8080)
+REVIEW UI  (Flask port 8081)
   └── User confirms / edits all fields before any FamilySearch write
       tmp/<uuid>.json  →  output/<Surname_Given>.json
 
@@ -141,6 +147,33 @@ FAMILYSEARCH API  [future — sandbox first]
   ├── Attach Source citation (source_url)
   └── Record hints → open FamilySearch.org (never display full record)
 ```
+
+## Deployment
+
+Three-tier setup:
+
+- **Dev (Dell Optiplex 3060, Windows)** — primary code-editing environment. All commits originate here. Flask runs on `0.0.0.0:8081` via `python -m src.app`.
+- **Demo / Local (MacBook Air)** — launchd service `com.farwestlegacy.app` on port 8081. Reachable over Tailscale at `100.68.44.127:8081`. Used for live demos.
+- **Production (farwestlegacy.com)** — public-facing instance. Hosting platform / deploy process recorded in `repo-memory.md` (TODO until confirmed).
+
+Details, deploy commands, and access notes live in `repo-memory.md`.
+
+## Session Handoff
+
+`repo-memory.md` is the **single source of truth** for current state — sessions, deployment topology, stakeholders, active bugs, deferred bugs, pending decisions, env vars, external dependencies. **It must be updated before every session close.**
+
+- **Start of session:** run `scripts/begin.ps1` (Dell) or `scripts/begin.sh` (MacBook/Linux). Prints git status, last commit, test summary, and the last 30 lines of `repo-memory.md`.
+- **End of session:** run `scripts/close.ps1` / `scripts/close.sh`. Re-runs tests (must be green), prints git status, reminds you to update `repo-memory.md` and `CHANGELOG.md` before the final commit.
+
+## Stakeholders
+
+High-level only — full names, status, and meeting dates live in `repo-memory.md`.
+
+- **Joel Cannon / Cannon Digital LLC** — owner.
+- **Daviess County Historical Society** — sponsor.
+- **Mid-West Genealogy Center** — collaboration interest (potential library-patron rebrand).
+- **Matthew Johnson** — potential paying customer (archivist team workflow).
+- **FamilySearch / Gordon Clarke** — API partner.
 
 ## Key Contacts (do not commit to repo)
 

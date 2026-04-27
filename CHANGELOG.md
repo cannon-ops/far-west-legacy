@@ -5,6 +5,55 @@ Format: session number, date, milestone label, summary of changes.
 
 ---
 
+## Session 002 close — 2026-04-26 — Session Handoff Infrastructure
+
+**Goal:** Stand up production-aware session-handoff infrastructure now that FWL is graduating from a personal project to a product with stakeholders (live site, library collaboration interest, paid-customer lead).
+
+### Added
+- `repo-memory.md` — single source of truth for current state: deployment topology (Dev / Demo / Production), stakeholders, recent sessions, active bugs (URL fetching P0), deferred bugs, pending decisions, env vars, external dependencies. To be updated before every session close.
+- `scripts/begin.sh` and `scripts/begin.ps1` — session-start helpers (git status, last commit, test summary, last 30 lines of `repo-memory.md`).
+- `scripts/close.sh` and `scripts/close.ps1` — session-end helpers (re-run tests, print git status, remind to update `repo-memory.md` and `CHANGELOG.md`).
+
+### Changed
+- `CLAUDE.md`:
+  - Port `8080` → `8081` everywhere (stack, milestone notes, file manifest, architecture diagram).
+  - FamilySearch API rule #1 now reads "Beta first" (was "Sandbox / integration"); env var is `FAMILYSEARCH_ENV=beta`.
+  - Secrets section notes the beta `FAMILYSEARCH_CLIENT_ID` (AppKey) lives in `.env`.
+  - New **Deployment** section (Dev → MacBook Demo → Production at farwestlegacy.com).
+  - New **Session Handoff** section (`repo-memory.md` is single source of truth; `scripts/begin.*` and `scripts/close.*` workflow).
+  - New **Stakeholders** section (high-level; details in `repo-memory.md`).
+  - File manifest extended with `repo-memory.md`, the four session scripts, `start_mac.sh`, and `copy_sample_mac.sh`.
+
+### Tests
+- 30 passed, 3 skipped (no regressions)
+
+### Flagged TODOs
+- `repo-memory.md` Production section: hosting platform, deployment process, and access list are placeholders pending confirmation.
+- URL-fetching bug needs a reproduction case captured in the next session.
+
+---
+
+## Session 001 close — 2026-04-19 — Conference Demo & Production Launch
+
+**Goal:** Wrap FWL 001: stand up the MacBook demo via SSH from the Dell, deploy to `farwestlegacy.com`, and demo live at the AI+Genealogy seminar at the Mid-West Genealogy Center.
+
+### Added
+- `start_mac.sh`, `copy_sample_mac.sh` — macOS demo helpers (already shipped in sessions 003/003a, finalized for conference use).
+- Production deployment to `farwestlegacy.com` (hosting platform / deploy details captured in `repo-memory.md` — TODO to confirm).
+
+### Demoed
+- Live at the **Mid-West Genealogy Center** AI+Genealogy seminar.
+
+### Outcomes
+- **Mid-West Genealogy Center** — Director **Katie Smith** raised possible collaboration with potential rebrand for library patrons. Scope undefined.
+- **Matthew Johnson** — surfaced as a potential paying customer for archivist-team document processing (obituaries + pedigree charts + family trees). Meeting set for 2026-04-27.
+- FWL graduates from "personal project" to "product with stakeholders" — motivated the handoff infrastructure work in session 002.
+
+### Tests
+- 30 passed, 3 skipped (no regressions)
+
+---
+
 ## Session 004 — 2026-04-18 — launchd Deploy
 
 **Goal:** Deploy Flask as a persistent user-level launchd service on the MacBook, so the demo survives SSH disconnect and reboot.
