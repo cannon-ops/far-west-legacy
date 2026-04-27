@@ -12,7 +12,17 @@
   <form method="post" action="/extract">
 
     <div class="field">
-      <label for="obituary_text">Obituary Text</label>
+      <div class="field-header">
+        <label for="obituary_text">Obituary Text</label>
+        <details class="sample-dropdown">
+          <summary>Try a sample &#x25BE;</summary>
+          <div class="sample-menu" role="menu">
+            <button type="button" data-sample="neese" role="menuitem">Donna Neese</button>
+            <button type="button" data-sample="veteran" role="menuitem">Harold Whitaker (Veteran)</button>
+            <button type="button" data-sample="amish" role="menuitem">Ada Miller (Amish)</button>
+          </div>
+        </details>
+      </div>
       <textarea
         id="obituary_text"
         name="obituary_text"
@@ -40,14 +50,6 @@
 
     <div class="form-actions">
       <button type="submit" class="btn btn-primary">Extract &rarr;</button>
-      <details class="sample-dropdown">
-        <summary>Try a sample &#x25BE;</summary>
-        <div class="sample-menu" role="menu">
-          <button type="button" data-sample="neese" role="menuitem">Donna Neese</button>
-          <button type="button" data-sample="veteran" role="menuitem">Harold Whitaker (Veteran)</button>
-          <button type="button" data-sample="amish" role="menuitem">Ada Miller (Amish)</button>
-        </div>
-      </details>
       <span style="font-family: sans-serif; font-size: 0.8rem; color: var(--muted);">
         This will call the Claude API (Haiku).
       </span>
@@ -57,6 +59,13 @@
 </div>
 
 <style>
+  .field-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+  }
+  .field-header label { margin-bottom: 0; }
   .sample-dropdown { position: relative; display: inline-block; font-family: sans-serif; }
   .sample-dropdown > summary {
     list-style: none;
@@ -73,7 +82,7 @@
   .sample-menu {
     position: absolute;
     top: 100%;
-    left: 0;
+    right: 0;
     margin-top: 0.25rem;
     background: #fff;
     border: 1px solid var(--border, #ddd);
@@ -115,7 +124,6 @@
         if (url) url.value = '';
         const dd = btn.closest('details');
         if (dd) dd.open = false;
-        if (ta.form) ta.form.requestSubmit();
       });
     });
     document.addEventListener('click', function (e) {
