@@ -126,16 +126,21 @@ The FamilySearch Solutions Agreement includes a publicity restriction:
   - `demo/` — synthetic demo obituaries (neese, veteran, amish)
   - `start_mac.sh`, `copy_sample_mac.sh` — macOS demo scripts
 - **Milestone 2 (next):** FamilySearch OAuth + sandbox writes
-- **Milestone 3 (future):** Photo/portrait handling, Sonnet vision OCR, production release
+- **Milestone 3 (in progress):** Scanned-obituary pipeline per `docs/obituary-pipeline-DRAFT.md`
+  - M3.0 (complete): fixtures + model eval — Haiku 4.5 @ 1568px long edge is the transcription default (`docs/m3-0-eval-note.md`)
+  - M3.1 (complete): single-scan happy path — `src/ingest.py`, `src/transcribe.py`, `POST /upload`, scan review UI
+  - M3.2–M3.5 (future): confidence/provenance, page segmentation, batch queue, FS Memories upload
 
 ## Current File Manifest
 
 | File | Purpose |
 | --- | --- |
-| `src/extract.py` | `extract_from_text()` — Claude Haiku, returns structured dict, raises `ExtractionError` |
+| `src/extract.py` | `extract_from_text()` — Claude Haiku, returns structured dict, raises `ExtractionError`; stop_reason-gated |
 | `src/fetch.py` | `fetch_obituary_text()` — HTTP GET + BS4 parse, raises `FetchError` |
 | `src/cli.py` | CLI: `--text`, `--file`, `--url`; saves JSON to `output/` |
-| `src/app.py` | Flask app port 8081 (configurable via `FLASK_PORT`): `GET /` (marketing home), `GET /tool`, `POST /extract`, `GET /review/<id>`, `POST /approve/<id>` |
+| `src/ingest.py` | `ingest_upload()` — scan validation + normalization (per-page 1568px PNGs, sha256, `tmp/<job_id>/` manifest), raises `IngestError`; no network |
+| `src/transcribe.py` | `segment_probe()` + `transcribe_page()` — Haiku 4.5 vision, stop_reason-gated, raises `TranscriptionError` |
+| `src/app.py` | Flask app port 8081 (configurable via `FLASK_PORT`): `GET /` (marketing home), `GET /tool`, `POST /extract`, `POST /upload` (scan path), `GET /scan/<id>/<page>`, `GET /review/<id>`, `POST /approve/<id>` |
 | `templates/home.html` | Marketing homepage at `/` (production landing page) |
 | `render.yaml` | Render Blueprint — defines the production web service for `farwestlegacy.com` |
 | `NOTES.md` | Tech-debt notes (cross-referenced in `repo-memory.md` Known Issues) |
@@ -156,7 +161,7 @@ The FamilySearch Solutions Agreement includes a publicity restriction:
 INPUTS
   ├── Pasted text         → direct
   ├── Obituary URL        → fetch.py (requests + BeautifulSoup)
-  └── Photo/scan          → [future] Claude Sonnet vision
+  └── Photo/scan          → ingest.py + transcribe.py (Haiku 4.5 vision, M3.1)
 
 EXTRACTION  (Claude Haiku, max_tokens=4096)
   └── prompts/obituary_extract.md → structured JSON

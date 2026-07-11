@@ -23,14 +23,22 @@ _project_root = Path(__file__).parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from flask import Flask, jsonify, redirect, render_template, request, url_for
+from flask import Flask, jsonify, redirect, render_template, request, send_file, url_for
 
 from src.extract import ExtractionError, extract_from_text
 from src.fetch import FetchError, fetch_obituary_text
+from src.ingest import MAX_UPLOAD_BYTES, IngestError, ingest_upload
+from src.transcribe import (
+    TRANSCRIBE_MODEL,
+    TranscriptionError,
+    segment_probe,
+    transcribe_page,
+)
 from src.version import APP_VERSION, CHANGELOG_TEXT
 
 app = Flask(__name__, template_folder="../templates")
 app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-in-prod")
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 
 BASE_DIR = Path(__file__).parent.parent
 TMP_DIR = BASE_DIR / "tmp"
@@ -97,6 +105,22 @@ def _output_filename(deceased: dict) -> str:
     return f"{surname}_{given}.json"
 
 
+def build_citation(deceased: dict, capture_meta: dict) -> tuple[str, bool]:
+    """
+    Assemble the source-citation line from capture metadata.
+
+    "unknown" is a legal answer for newspaper and date; it produces a
+    visibly weaker citation. Returns (citation_text, is_weak).
+    """
+    name = f"{deceased.get('given_names', '')} {deceased.get('surname', '')}".strip()
+    newspaper = (capture_meta.get("newspaper") or "unknown").strip()
+    pub_date = (capture_meta.get("publication_date") or "unknown").strip()
+    weak = newspaper.lower() == "unknown" or pub_date.lower() == "unknown"
+    paper_part = "unidentified newspaper" if newspaper.lower() == "unknown" else newspaper
+    date_part = "date unknown" if pub_date.lower() == "unknown" else pub_date
+    return f"Obituary of {name or 'unknown person'}, {paper_part}, {date_part}.", weak
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -153,13 +177,120 @@ def extract():
     return redirect(url_for("review", job_id=job_id))
 
 
+@app.post("/upload")
+def upload():
+    """Scanned-obituary path (M3.1): ingest → segment probe → transcribe →
+    existing extract → same review UI. Anthropic is the only network use."""
+    file = request.files.get("scan_file")
+    if file is None or not file.filename:
+        record_activity("scan_error", error_type="ValidationError", message="missing file")
+        return render_template("index.html", error="Please choose a scan file to upload.")
+
+    # Capture metadata is asked every time; blank is a legal "unknown" and
+    # produces a visibly weaker citation (Chief's ratified design).
+    newspaper = (request.form.get("capture_newspaper") or "").strip() or "unknown"
+    pub_date = (request.form.get("capture_date") or "").strip() or "unknown"
+
+    try:
+        manifest = ingest_upload(file.filename, file.read(), TMP_DIR)
+    except IngestError as exc:
+        record_activity("scan_error", error_type="IngestError", message=str(exc))
+        return render_template("index.html", error=f"Could not ingest scan: {exc}")
+
+    job_id = manifest["job_id"]
+    job_dir = TMP_DIR / job_id
+
+    try:
+        # One probe per page; M3.1 handles exactly one obituary total.
+        found = []  # (page_number, obituary dict)
+        for page_no, page_file in enumerate(manifest["page_files"], 1):
+            probe = segment_probe(job_dir / page_file)
+            for obit in probe.get("obituaries") or []:
+                found.append((page_no, obit))
+
+        if not found:
+            record_activity("scan_error", error_type="NoObituary", job_id=job_id)
+            return render_template(
+                "index.html",
+                error="No obituary was found on the uploaded scan. "
+                      "Check that the image shows the obituary clearly.",
+            )
+        if len(found) > 1:
+            names = ", ".join(o.get("name", "?") for _, o in found)
+            record_activity("scan_error", error_type="MultiObituary",
+                            job_id=job_id, count=len(found))
+            return render_template(
+                "index.html",
+                error=f"This scan contains {len(found)} obituaries ({names}). "
+                      "Multi-obituary pages arrive in M3.3 — for now, upload a "
+                      "single-obituary clipping or crop the page first.",
+            )
+
+        page_no = found[0][0]
+        transcript = transcribe_page(job_dir / manifest["page_files"][page_no - 1])
+    except TranscriptionError as exc:
+        record_activity("scan_error", error_type="TranscriptionError", message=str(exc))
+        return render_template("index.html", error=f"Transcription failed: {exc}")
+
+    try:
+        result = extract_from_text(transcript["text"])
+    except ExtractionError as exc:
+        record_activity("scan_error", error_type="ExtractionError", message=str(exc))
+        return render_template("index.html", error=f"Extraction failed: {exc}")
+
+    result["source_url"] = ""
+    result["raw_text"] = transcript["text"]  # transcript is the durable evidence
+    result["scan"] = {
+        "job_id": job_id,
+        "page": page_no,
+        "pages": manifest["pages"],
+        "original_filename": manifest["original_filename"],
+        "sha256": manifest["sha256"],
+        "transcription_model": TRANSCRIBE_MODEL,
+        "illegible_spans": transcript.get("illegible_spans") or [],
+        "layout_notes": transcript.get("layout_notes") or "",
+        "portrait": transcript.get("portrait") or {"present": False},
+        "header_context": transcript.get("header_context") or {},
+    }
+    result["capture_meta"] = {
+        "newspaper": newspaper,
+        "publication_date": pub_date,
+        "entered_by": "operator",
+        "auto_detected": transcript.get("header_context") or {},
+    }
+
+    TMP_DIR.mkdir(exist_ok=True)
+    _tmp_path(job_id).write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    record_activity("scan_ok", job_id=job_id, pages=manifest["pages"],
+                    illegible=len(result["scan"]["illegible_spans"]))
+    return redirect(url_for("review", job_id=job_id))
+
+
+@app.get("/scan/<job_id>/<int:page>")
+def scan_image(job_id: str, page: int):
+    """Serve a normalized page image from a scan job dir (review UI)."""
+    try:
+        uuid.UUID(job_id)  # reject anything that isn't a bare job UUID
+    except ValueError:
+        return "Not found", 404
+    path = TMP_DIR / job_id / f"page_{page}.png"
+    if not path.exists():
+        return "Not found", 404
+    return send_file(path, mimetype="image/png")
+
+
 @app.get("/review/<job_id>")
 def review(job_id: str):
     tmp = _tmp_path(job_id)
     if not tmp.exists():
         return redirect(url_for("tool"))
     result = json.loads(tmp.read_text(encoding="utf-8"))
-    return render_template("review.html", job_id=job_id, data=result)
+    citation = citation_weak = None
+    if result.get("capture_meta"):
+        citation, citation_weak = build_citation(result.get("deceased", {}), result["capture_meta"])
+    return render_template("review.html", job_id=job_id, data=result,
+                           citation=citation, citation_weak=citation_weak)
 
 
 @app.get("/approve/<job_id>")
@@ -224,6 +355,21 @@ def approve(job_id: str):
         "source_url": original.get("source_url", ""),
         "raw_text": original.get("raw_text", ""),
     }
+
+    # Scan jobs (M3.1): carry provenance through; capture metadata is
+    # human-confirmable in the review form, so re-read it here.
+    if original.get("scan"):
+        result["scan"] = original["scan"]
+    if original.get("capture_meta"):
+        capture_meta = dict(original["capture_meta"])
+        capture_meta["newspaper"] = (
+            request.form.get("capture_newspaper") or ""
+        ).strip() or "unknown"
+        capture_meta["publication_date"] = (
+            request.form.get("capture_date") or ""
+        ).strip() or "unknown"
+        result["capture_meta"] = capture_meta
+        result["citation"] = build_citation(deceased, capture_meta)[0]
 
     OUTPUT_DIR.mkdir(exist_ok=True)
     filename = _output_filename(deceased)

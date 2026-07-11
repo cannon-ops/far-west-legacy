@@ -8,6 +8,40 @@
   .rel-parent   { grid-template-columns: 1fr 1fr 1fr auto auto; }
   .rel-child    { grid-template-columns: 1fr 1fr auto auto; }
   .rel-sibling  { grid-template-columns: 1fr 1fr 1fr auto auto; }
+
+  /* Scan-job review (M3.1) */
+  .scan-image-panel img {
+    width: 100%;
+    display: block;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .citation-preview {
+    font-size: 0.9rem;
+    padding: 0.6rem 0.8rem;
+    border-radius: var(--radius);
+    background: var(--accent-light);
+    border: 1px solid var(--border);
+    margin-top: 0.5rem;
+  }
+  .citation-preview.weak {
+    background: #fdf6e3;
+    border-color: #e0c060;
+    color: #8a6d1a;
+  }
+  .raw-panel mark.illegible {
+    background: #fde8e8;
+    color: var(--danger);
+    border-radius: 3px;
+    padding: 0 2px;
+  }
+  .illegible-list {
+    font-family: sans-serif;
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-top: 0.5rem;
+    padding-left: 1rem;
+  }
 </style>
 {% endblock %}
 
@@ -198,6 +232,40 @@
       <button type="button" class="btn btn-add" onclick="addRelEntry('siblings','sibling',['given_names','surname','maiden_name'],['Deceased'])">+ Add Sibling</button>
     </div>
 
+    {% if data.capture_meta %}
+    <!-- Source citation (scan jobs, M3.1) -->
+    <div class="card">
+      <h3 style="margin-top:0">Source Citation</h3>
+      <div class="field-row cols-2">
+        <div class="field">
+          <label>Newspaper</label>
+          <input type="text" name="capture_newspaper"
+                 value="{{ '' if data.capture_meta.newspaper == 'unknown' else data.capture_meta.newspaper }}"
+                 placeholder="unknown">
+        </div>
+        <div class="field">
+          <label>Publication Date</label>
+          <input type="text" name="capture_date"
+                 value="{{ '' if data.capture_meta.publication_date == 'unknown' else data.capture_meta.publication_date }}"
+                 placeholder="unknown">
+        </div>
+      </div>
+      {% set hc = data.scan.header_context if data.scan else {} %}
+      {% if hc.newspaper or hc.page_date %}
+      <p style="font-family:sans-serif; font-size:0.8rem; color:var(--muted); margin-bottom:0.25rem;">
+        Detected in the scan header:
+        {% if hc.newspaper %}newspaper &ldquo;{{ hc.newspaper }}&rdquo;{% endif %}{% if hc.newspaper and hc.page_date %}, {% endif %}
+        {% if hc.page_date %}date &ldquo;{{ hc.page_date }}&rdquo;{% endif %}
+      </p>
+      {% endif %}
+      <div class="citation-preview{{ ' weak' if citation_weak }}">
+        {{ citation }}
+        {% if citation_weak %}<br><span style="font-family:sans-serif; font-size:0.78rem;">
+          Weak citation — newspaper or date unknown. Fill them in above if you can.</span>{% endif %}
+      </div>
+    </div>
+    {% endif %}
+
     <!-- Eulogy & Service -->
     <div class="card">
       <h3 style="margin-top:0">Eulogy Text</h3>
@@ -219,11 +287,37 @@
   </form>
   </div>
 
-  <!-- Right: raw text sidebar -->
+  <!-- Right: scan image (scan jobs) + raw text/transcript sidebar -->
   <div class="sticky-sidebar">
+    {% if data.scan %}
+    <div class="card scan-image-panel" style="margin-bottom:0.75rem;">
+      <h3 style="margin-top:0">Scanned Image</h3>
+      <a href="/scan/{{ data.scan.job_id }}/{{ data.scan.page }}" target="_blank" rel="noopener"
+         title="Open full size in a new tab">
+        <img src="/scan/{{ data.scan.job_id }}/{{ data.scan.page }}" alt="Uploaded obituary scan">
+      </a>
+      {% if data.scan.pages > 1 %}
+      <p style="font-family:sans-serif; font-size:0.78rem; color:var(--muted); margin-top:0.4rem;">
+        Page {{ data.scan.page }} of {{ data.scan.pages }}.</p>
+      {% endif %}
+      {% if data.scan.portrait and data.scan.portrait.present %}
+      <p style="font-family:sans-serif; font-size:0.78rem; color:var(--muted); margin-top:0.4rem;">
+        Portrait photo detected ({{ data.scan.portrait.region or 'location unknown' }}) —
+        photo upload to FamilySearch arrives in M3.5.</p>
+      {% endif %}
+    </div>
+    {% endif %}
     <div class="card">
-      <h3 style="margin-top:0">Original Obituary Text</h3>
-      <div class="raw-panel">{{ data.raw_text }}</div>
+      <h3 style="margin-top:0">{{ "Transcript (verbatim)" if data.scan else "Original Obituary Text" }}</h3>
+      <div class="raw-panel" id="raw-panel">{{ data.raw_text }}</div>
+      {% if data.scan and data.scan.illegible_spans %}
+      <ul class="illegible-list">
+        {% for span in data.scan.illegible_spans %}
+        <li><strong>{{ span.marker }}</strong> — best guess:
+          {{ span.guess or "none" }} ({{ span.reason or "unreadable" }})</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
     </div>
     {% if data.source_url %}
     <div class="card" style="margin-top:0.75rem; padding: 0.75rem 1rem;">
@@ -236,6 +330,16 @@
 </div><!-- /review-layout -->
 
 <script>
+// Highlight [illegible:n] markers in the transcript panel (scan jobs)
+(function () {
+  const panel = document.getElementById('raw-panel');
+  if (!panel || panel.textContent.indexOf('[illegible:') === -1) return;
+  const escaped = panel.textContent
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  panel.innerHTML = escaped.replace(/\[illegible:\d+\]/g,
+    function (m) { return '<mark class="illegible">' + m + '</mark>'; });
+})();
+
 // Keep hidden deceased value in sync with checkbox
 function syncDeceased(cb, hiddenName) {
   const hidden = document.querySelector(`input[name="${hiddenName}"]`);

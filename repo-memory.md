@@ -6,20 +6,23 @@ Single source of truth for current state. Update before every session close.
 
 ## Current State
 
-- **Branch:** `fwl-008-m3-0-eval` (not yet merged to `main`)
-- **Last commit at session close:** see `git log` — FWL-008: M3.0 fixture generator + vision transcription eval, results in `docs/m3-0-eval-note.md`
-- **Tests:** 45 passed, 3 skipped (network integration tests, gated by `RUN_NETWORK_TESTS=1`)
-- **Milestone:** 1 complete (extract + fetch + CLI + Flask review UI). Milestone 2 not started. Milestone 3.0 (fixtures + model eval) complete — see `docs/m3-0-eval-note.md`; M3.1 (ingest/transcribe/review UI build-out) not started.
+- **Branch:** `fwl-009-m3-1-scan-path` (not yet merged to `main`; `fwl-008-m3-0-eval` merged to main and pushed 2026-07-11)
+- **Last commit at session close:** see `git log` — FWL-009: M3.1 single-scan happy path (ingest + transcribe + upload route + scan review UI)
+- **Tests:** 85 passed, 4 skipped (network/vision integration tests, gated by `RUN_NETWORK_TESTS=1`)
+- **Milestone:** 1 complete (extract + fetch + CLI + Flask review UI). Milestone 2 not started. M3.0 (fixtures + model eval) complete — see `docs/m3-0-eval-note.md`. **M3.1 (single-scan happy path) complete on this branch** — smoke-verified end-to-end on the `neese_clean` fixture (transcript CER 0.000). M3.2 (confidence + provenance.py) next.
 - **What works right now:**
   - Paste obituary text or supply a `.txt` file → Claude Haiku extracts structured JSON (deceased + relationships + eulogy + service details).
   - Flask review UI on port 8081: paste/URL → extract → editable review form → approve → JSON saved to `output/`.
+  - **Scan upload (M3.1, this branch):** JPEG/PNG/TIFF/PDF at `/tool` → ingest (per-page 1568px PNGs, sha256, `tmp/<job_id>/`) → segmentation probe → Haiku 4.5 vision transcription (`[illegible:n]` markers, header context) → existing extract path → same review UI with scanned-image + transcript panes + editable Source Citation (newspaper/date; "unknown" legal, weaker citation) → approved JSON carries `scan` provenance + `capture_meta` + `citation`. Multi-obituary pages detected and deferred to M3.3.
+  - All extraction/vision calls gated on `stop_reason` (truncation retries once at 8192 tokens, then fails loud).
   - Production site live at `farwestlegacy.com` (Render auto-deploy on push to main).
   - UptimeRobot keep-alive monitor (ID 802933445, 5min ping) prevents Render free-tier cold starts.
-  - M3.0 eval tooling: `make fixtures` (synthetic scan generator), `scripts/m3_eval.py` (Sonnet-vs-Haiku vision transcription eval) — measured, not yet wired into the app.
+  - M3.0 eval tooling: `make fixtures` (synthetic scan generator), `scripts/m3_eval.py` (Sonnet-vs-Haiku vision transcription eval).
 - **What does not work yet:**
   - URL fetching for online obituaries (see Active Bugs).
   - FamilySearch OAuth + writes (Milestone 2 — not started).
-  - Photo / OCR ingestion pipeline itself (M3.1–M3.5 — M3.0 eval done, `src/ingest.py`/`src/transcribe.py` not built yet).
+  - M3.2+ of the scan pipeline: per-field confidence/evidence (`_meta`), `provenance.py` manifest, multi-obituary child jobs (M3.3), batch/queue (M3.4), FS Memories upload (M3.5).
+  - Note: Render free-tier ephemeral filesystem means uploaded scans in `tmp/<job_id>/` vanish on restart — acceptable for single-user demo, blocking for batch (known issue, unchanged).
 
 ---
 
@@ -80,6 +83,7 @@ Three-tier setup:
 - **003 (2026-04-27) — Website Wording + Render Auto-Deploy Fix:** Softened hero claim and "What it does" paragraph in `templates/home.html` to reflect sandbox-only status. Added FS API attribution + Intellectual Reserve trademark notice to footer in `templates/base.html`. Tests: 30 passed, 3 skipped. Diagnosed and fixed Render auto-deploy: GitHub App was installed on personal `joelcannon` account but not on `cannon-ops` org — installed at org level (single-repo scope). UptimeRobot monitor 802933445 created (5-min keep-alive). Three-pass workflow discipline (recon → diff → execute) formalized across all Cannon Ops projects. Note: this FWL 003 (2026-04-27) is distinct from the earlier Session 003/003a (2026-04-18, MacBook demo scripts, now deprecated). Future sessions adopt date-disambiguating labels. Commit `00f033f`.
 - **FWL-006 / FWL-007 (2026-07-10) — Design drafts:** `planning/familysearch-upload-plan.md` (FamilySearch profile-upload integration plan) and `docs/obituary-pipeline-DRAFT.md` + `docs/familysearch-integration-DRAFT.md` (scanned-obituary pipeline design, Milestone 3 phased plan M3.0–M3.5). No code. Commits `f47e454`, `906f331`.
 - **FWL-008 / Session 008 (2026-07-11) — M3.0 fixture generator + vision transcription eval:** Built `scripts/gen_fixtures.py` (synthetic scan fixtures, `make fixtures`), `scripts/m3_eval.py` (Sonnet 5 vs. Haiku 4.5 transcription eval: resolution-knee matrix, segmentation-probe accuracy, PDF-vs-per-page comparison), `scripts/eval_metrics.py` (CER/WER/IoU), `prompts/obituary_transcribe.md`. Ran the full eval against synthetic fixtures (~$0.39 API spend). Results and chosen defaults in `docs/m3-0-eval-note.md`: Haiku 4.5 @ 1568px long edge is the default transcription tier (reaches CER parity with Sonnet at ≥1092px, ~2–3× cheaper); crop-then-transcribe confirmed over full-page name-targeted for segmentation; per-page image ingest kept over native PDF input (PDF tested only the trivial one-obit-per-page case). Tests: 45 passed, 3 skipped. Open questions needing real (non-synthetic) samples remain: pre-1930 newsprint (open q.6), handwritten material (open q.3, out of scope).
+- **FWL-009 / Session 009 (2026-07-11) — M3.1 single-scan happy path (branch `fwl-009-m3-1-scan-path`):** Merged `fwl-008-m3-0-eval` to `main` (fast-forward, pushed) then built M3.1 on a new branch. New: `src/ingest.py` (JPEG/PNG/TIFF/PDF → per-page 1568px PNGs + sha256 + manifest in `tmp/<job_id>/`; `pypdfium2` + `pillow` added to requirements), `src/transcribe.py` (Haiku 4.5 `segment_probe` + `transcribe_page`, every call stop_reason-gated: truncation retries once at 8192 then fails loud), same gate added to `src/extract.py`. App: `POST /upload`, `GET /scan/<job_id>/<page>`, capture-metadata form (newspaper + date asked every upload; blank = "unknown" = visibly weaker citation), `build_citation()`, approve carries `scan` + `capture_meta` + `citation`. Review UI gains scanned-image pane, verbatim-transcript pane with `[illegible:n]` highlighting, editable Source Citation card. Multi-obit pages deferred to M3.3 with a message. Live smoke: `neese_clean.png` upload → CER 0.000 transcript, header auto-detected, approve → `output/Neese_Donna_Sue.json` with citation + provenance; `page_3obits.png` correctly rejected with all 3 names. Tests: 85 passed, 4 skipped. App version 0.6.0.
 
 ---
 

@@ -5,6 +5,39 @@ Format: session number, date, milestone label, summary of changes.
 
 ---
 
+## Session 009 (2026-07-11) — M3.1 Single-Scan Happy Path
+
+**Version: 0.6.0**
+
+- `src/ingest.py` — scan upload validation + normalization: JPEG/PNG/TIFF/PDF in,
+  per-page 1568px-long-edge PNGs out (M3.0 ratified defaults), sha256 + job dir +
+  manifest under `tmp/<job_id>/`. Pure, no network. PDF page rendering via `pypdfium2`
+  (new dependency; `pillow` promoted to a runtime dependency).
+- `src/transcribe.py` — Claude vision calls (Haiku 4.5, the M3.0 default):
+  `segment_probe()` (obituary count + names per page) and `transcribe_page()`
+  (verbatim transcript JSON with `[illegible:n]` markers, layout notes, portrait
+  detection, header context). Every call gated on `stop_reason`: max_tokens
+  truncation retries once at 8192, then fails loud — truncated output is never used.
+- `src/extract.py` — same `stop_reason` gate added to the existing text-extraction call.
+- `src/app.py` — `POST /upload` (ingest → per-page segment probe → transcribe →
+  existing extract path → same review UI), `GET /scan/<job_id>/<page>` (serves the
+  normalized page image, UUID-validated), capture-metadata handling (newspaper +
+  publication date asked at upload, "unknown" legal → visibly weaker citation),
+  `build_citation()`, approve carries `scan` provenance + `capture_meta` + `citation`
+  into the output JSON. Multi-obituary pages are detected and deferred with a friendly
+  message (parent/child jobs arrive in M3.3).
+- `templates/index.html` — scan-upload form (file + newspaper + date) alongside paste/URL.
+- `templates/review.html` — scan-job review: scanned image pane, verbatim transcript
+  pane with `[illegible:n]` highlighting + guesses, editable Source Citation card with
+  weak-citation warning and detected-header hint. Paste/URL review unchanged.
+- Live smoke (Anthropic API only): `neese_clean.png` fixture upload → transcript
+  CER 0.000 vs ground truth, header auto-detected (newspaper/date/page), correct
+  fields in review UI, approved JSON in `output/` with citation + scan provenance;
+  3-obit page fixture correctly deferred to M3.3 with all three names found.
+- Tests: 85 passed, 4 skipped (network/vision tests gated by `RUN_NETWORK_TESTS=1`).
+
+---
+
 ## Session 008 (2026-07-11) — M3.0 Vision Transcription Eval
 
 - `scripts/gen_fixtures.py` — synthetic scan fixture generator (Pillow): clean/degraded/

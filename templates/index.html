@@ -58,6 +58,42 @@
   </form>
 </div>
 
+<div class="card">
+  <form method="post" action="/upload" enctype="multipart/form-data" id="upload-form">
+
+    <div class="field">
+      <label for="scan_file">Or upload a scanned obituary (JPEG, PNG, TIFF, PDF)</label>
+      <input type="file" id="scan_file" name="scan_file"
+             accept=".jpg,.jpeg,.png,.tif,.tiff,.pdf" required>
+    </div>
+
+    <div class="field-row cols-2">
+      <div class="field">
+        <label for="capture_newspaper">Newspaper</label>
+        <input type="text" id="capture_newspaper" name="capture_newspaper"
+               placeholder="e.g. Gallatin North Missourian">
+      </div>
+      <div class="field">
+        <label for="capture_date">Publication Date</label>
+        <input type="text" id="capture_date" name="capture_date"
+               placeholder="YYYY-MM-DD">
+      </div>
+    </div>
+    <p style="font-family: sans-serif; font-size: 0.8rem; color: var(--muted); margin: -0.25rem 0 0.75rem;">
+      Leave blank if unknown — that's allowed, but the saved citation will be
+      visibly weaker (&ldquo;unidentified newspaper&rdquo;, &ldquo;date unknown&rdquo;).
+    </p>
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">Transcribe &amp; Extract &rarr;</button>
+      <span style="font-family: sans-serif; font-size: 0.8rem; color: var(--muted);">
+        This will call the Claude API (vision transcription + extraction).
+      </span>
+    </div>
+
+  </form>
+</div>
+
 <style>
   .field-header {
     display: flex;
@@ -131,6 +167,18 @@
         if (!d.contains(e.target)) d.open = false;
       });
     });
+    const uploadForm = document.getElementById('upload-form');
+    if (uploadForm) {
+      uploadForm.addEventListener('submit', function () {
+        const btn = uploadForm.querySelector('button[type="submit"]');
+        if (btn) {
+          setTimeout(function () {
+            btn.disabled = true;
+            btn.textContent = 'Transcribing… (may take a minute)';
+          }, 0);
+        }
+      });
+    }
     const form = document.querySelector('form[action="/extract"]');
     if (form) {
       form.addEventListener('submit', function (e) {

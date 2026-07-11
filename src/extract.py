@@ -18,6 +18,8 @@ PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 SYSTEM_PROMPT_PATH = PROMPTS_DIR / "obituary_extract.md"
 
 MODEL = "claude-haiku-4-5-20251001"
+MAX_TOKENS = 4096
+RETRY_MAX_TOKENS = 8192
 
 
 class ExtractionError(Exception):
@@ -64,15 +66,35 @@ def extract_from_text(obituary_text: str, source_url: str = "") -> dict:
 
     client = Anthropic(api_key=api_key)
 
+    # Gate on stop_reason: a max_tokens truncation retries once at a higher
+    # cap, then fails loud — truncated JSON is never returned.
     try:
         response = client.messages.create(
             model=MODEL,
-            max_tokens=4096,
+            max_tokens=MAX_TOKENS,
             system=system_prompt,
             messages=[{"role": "user", "content": user_message}],
         )
+        if response.stop_reason == "max_tokens":
+            response = client.messages.create(
+                model=MODEL,
+                max_tokens=RETRY_MAX_TOKENS,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_message}],
+            )
     except Exception as exc:
         raise ExtractionError(f"Anthropic API call failed: {exc}") from exc
+
+    if response.stop_reason == "max_tokens":
+        raise ExtractionError(
+            f"Model output still truncated at max_tokens={RETRY_MAX_TOKENS} — "
+            "refusing to return partial JSON."
+        )
+    if response.stop_reason != "end_turn":
+        raise ExtractionError(
+            f"Unexpected stop_reason {response.stop_reason!r} — "
+            "refusing to use this response."
+        )
 
     raw_output = response.content[0].text
     cleaned = _strip_markdown_fences(raw_output)
