@@ -1,4 +1,8 @@
-.PHONY: test lint format run clean
+.PHONY: test lint format run clean fixtures
+
+# Regenerate synthetic scan fixtures (tests/fixtures/scans/, gitignored)
+fixtures:
+	python scripts/gen_fixtures.py
 
 # Run all tests
 test:

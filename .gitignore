@@ -51,3 +51,6 @@ tmp/
 
 # Test fixtures — real obituary data must never be committed
 tests/fixtures/*.txt
+
+# Generated synthetic scan fixtures — regenerate with `make fixtures`
+tests/fixtures/scans/
