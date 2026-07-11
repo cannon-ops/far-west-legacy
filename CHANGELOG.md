@@ -5,6 +5,24 @@ Format: session number, date, milestone label, summary of changes.
 
 ---
 
+## Session 008 (2026-07-11) — M3.0 Vision Transcription Eval
+
+- `scripts/gen_fixtures.py` — synthetic scan fixture generator (Pillow): clean/degraded/
+  phone-photo clippings + a 3-obituary page with ground-truth bboxes, deterministic per seed
+  (`make fixtures` target)
+- `scripts/m3_eval.py` — Sonnet 5 vs. Haiku 4.5 vision transcription eval: resolution-knee
+  matrix, segmentation-probe accuracy, PDF-vs-per-page-image comparison
+- `scripts/eval_metrics.py` — pure CER/WER/IoU metrics, unit-tested
+- `prompts/obituary_transcribe.md` — v1 transcription system prompt (verbatim, illegible
+  markers, header context, portrait detection)
+- Ran full eval against synthetic fixtures (~$0.39 API spend, BYOK): results and chosen
+  defaults recorded in `docs/m3-0-eval-note.md` — Haiku 4.5 @ 1568px long edge is the default
+  transcription tier (parity with Sonnet at 1092px+, ~2-3x cheaper); crop-then-transcribe
+  confirmed for segmentation; per-page image ingest kept over native PDF input
+- Tests: 45 passed, 3 skipped
+
+---
+
 ## Session 005a (2026-04-27) — Stale Job ID Cleanup
 
 **Version: 0.5.1**

@@ -6,19 +6,20 @@ Single source of truth for current state. Update before every session close.
 
 ## Current State
 
-- **Branch:** `main`
-- **Last commit at session close:** `00f033f` — FWL 003: soften hero claim; add FS API attribution to footer
-- **Tests:** 30 passed, 3 skipped (network integration tests, gated by `RUN_NETWORK_TESTS=1`)
-- **Milestone:** 1 complete (extract + fetch + CLI + Flask review UI). Milestone 2 not yet started.
+- **Branch:** `fwl-008-m3-0-eval` (not yet merged to `main`)
+- **Last commit at session close:** see `git log` — FWL-008: M3.0 fixture generator + vision transcription eval, results in `docs/m3-0-eval-note.md`
+- **Tests:** 45 passed, 3 skipped (network integration tests, gated by `RUN_NETWORK_TESTS=1`)
+- **Milestone:** 1 complete (extract + fetch + CLI + Flask review UI). Milestone 2 not started. Milestone 3.0 (fixtures + model eval) complete — see `docs/m3-0-eval-note.md`; M3.1 (ingest/transcribe/review UI build-out) not started.
 - **What works right now:**
   - Paste obituary text or supply a `.txt` file → Claude Haiku extracts structured JSON (deceased + relationships + eulogy + service details).
   - Flask review UI on port 8081: paste/URL → extract → editable review form → approve → JSON saved to `output/`.
   - Production site live at `farwestlegacy.com` (Render auto-deploy on push to main).
   - UptimeRobot keep-alive monitor (ID 802933445, 5min ping) prevents Render free-tier cold starts.
+  - M3.0 eval tooling: `make fixtures` (synthetic scan generator), `scripts/m3_eval.py` (Sonnet-vs-Haiku vision transcription eval) — measured, not yet wired into the app.
 - **What does not work yet:**
   - URL fetching for online obituaries (see Active Bugs).
   - FamilySearch OAuth + writes (Milestone 2 — not started).
-  - Photo / OCR ingestion (Milestone 3 — not started).
+  - Photo / OCR ingestion pipeline itself (M3.1–M3.5 — M3.0 eval done, `src/ingest.py`/`src/transcribe.py` not built yet).
 
 ---
 
@@ -77,6 +78,8 @@ Three-tier setup:
 - **002 (2026-04-26)** — Session handoff infrastructure: this `repo-memory.md`; `scripts/begin.{sh,ps1}` and `scripts/close.{sh,ps1}`; CLAUDE.md cleanup (port 8081, beta env, deployment + stakeholders + handoff sections); production awareness. Rebased onto the parallel Render-deploy commits before push.
 - **002b (2026-04-26)** — Tech debt + Render-first pivot: `src/app.py` deduplication, `FLASK_SECRET_KEY` env-var support, MacBook demo deprecation, URL fetch failures captured in `tests/fixtures/url_fetch_failures.md`. Commit `f0ce280`.
 - **003 (2026-04-27) — Website Wording + Render Auto-Deploy Fix:** Softened hero claim and "What it does" paragraph in `templates/home.html` to reflect sandbox-only status. Added FS API attribution + Intellectual Reserve trademark notice to footer in `templates/base.html`. Tests: 30 passed, 3 skipped. Diagnosed and fixed Render auto-deploy: GitHub App was installed on personal `joelcannon` account but not on `cannon-ops` org — installed at org level (single-repo scope). UptimeRobot monitor 802933445 created (5-min keep-alive). Three-pass workflow discipline (recon → diff → execute) formalized across all Cannon Ops projects. Note: this FWL 003 (2026-04-27) is distinct from the earlier Session 003/003a (2026-04-18, MacBook demo scripts, now deprecated). Future sessions adopt date-disambiguating labels. Commit `00f033f`.
+- **FWL-006 / FWL-007 (2026-07-10) — Design drafts:** `planning/familysearch-upload-plan.md` (FamilySearch profile-upload integration plan) and `docs/obituary-pipeline-DRAFT.md` + `docs/familysearch-integration-DRAFT.md` (scanned-obituary pipeline design, Milestone 3 phased plan M3.0–M3.5). No code. Commits `f47e454`, `906f331`.
+- **FWL-008 / Session 008 (2026-07-11) — M3.0 fixture generator + vision transcription eval:** Built `scripts/gen_fixtures.py` (synthetic scan fixtures, `make fixtures`), `scripts/m3_eval.py` (Sonnet 5 vs. Haiku 4.5 transcription eval: resolution-knee matrix, segmentation-probe accuracy, PDF-vs-per-page comparison), `scripts/eval_metrics.py` (CER/WER/IoU), `prompts/obituary_transcribe.md`. Ran the full eval against synthetic fixtures (~$0.39 API spend). Results and chosen defaults in `docs/m3-0-eval-note.md`: Haiku 4.5 @ 1568px long edge is the default transcription tier (reaches CER parity with Sonnet at ≥1092px, ~2–3× cheaper); crop-then-transcribe confirmed over full-page name-targeted for segmentation; per-page image ingest kept over native PDF input (PDF tested only the trivial one-obit-per-page case). Tests: 45 passed, 3 skipped. Open questions needing real (non-synthetic) samples remain: pre-1930 newsprint (open q.6), handwritten material (open q.3, out of scope).
 
 ---
 
