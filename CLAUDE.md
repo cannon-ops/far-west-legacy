@@ -2,6 +2,13 @@
 
 Standing rules for Claude Code (Agent 13) sessions.
 
+## Copy rule: no em dashes
+Never use em dashes (—) in anything a human reads as finished copy: website text, emails,
+memos, PDFs, print pieces, UI strings, social posts, commit-facing docs. They read as
+AI-written. Use a comma, a period, parentheses, or a colon instead. This applies to generated
+copy as well as hand-written copy. Markdown working files (.md) are exempt. En dashes are fine
+in numeric ranges only, never as a sentence dash.
+
 ## Project
 
 - **App:** Far West Legacy — open-source obituary → FamilySearch Family Tree tool
