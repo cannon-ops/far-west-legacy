@@ -93,6 +93,7 @@ For multi-step tasks, state a brief plan with verification per step. Strong succ
 4. Always include explicit file verification steps — files may be reported as created but not actually written.
 5. Surface all errors immediately. Never silently swallow exceptions.
 6. Wally (Claude Chat) handles planning/architecture. Agent 13 (Claude Code) handles execution only.
+7. Every manual ask of Chief carries a full absolute path or a copy/paste-ready command, never bare prose ("can you paste X," "grab Y"). This covers ANY manual ask, not just file references: retrieving content, pasting output, opening a page, verifying a setting. If Chief has to work out *where* or *how* before he can act, the ask was incomplete.
 
 ## FamilySearch API Rules
 
