@@ -2,15 +2,54 @@
 
 Standing rules for Claude Code (Agent 13) sessions.
 
-## Copy rule: no em dashes
+<!-- STD:BEGIN v1 (260807) -->
+## Standing Conventions (v1, 260807)
+
+### STD-001: Copy rule — no em dashes
 Never use em dashes (—) in anything a human reads as finished copy: website text, emails,
 memos, PDFs, print pieces, UI strings, social posts, commit-facing docs. They read as
 AI-written. Use a comma, a period, parentheses, or a colon instead. This applies to generated
 copy as well as hand-written copy. Markdown working files (.md) are exempt. En dashes are fine
 in numeric ranges only, never as a sentence dash.
 
-## Standing rule: build-date marker
+### STD-002: Orphan rule
+Same scope as STD-001: applies to finished human-facing copy (chat, email, websites, PDFs,
+print, UI strings, social posts, agent-generated copy). Markdown working files (.md) are
+exempt.
 
+Never leave a single word alone on the last line of a wrapped text block when it can be
+avoided. Pull the last two words onto the same line, or reword the sentence.
+
+Implementation in CSS is `text-wrap: pretty` on body copy and `text-wrap: balance` on
+headings. Do NOT use the `orphans` or `widows` CSS properties — they govern page and column
+breaks, not line wrapping, and will not do this job.
+
+`text-wrap: pretty` is unsupported in Firefox, so short high-visibility lines (headlines,
+taglines, buttons, card titles) also need a non-breaking space between the last two words as
+a fallback.
+
+### STD-003: Ask rule — full path or ready-to-run command
+Every manual ask of Chief carries a full absolute path or a copy/paste-ready command, never
+bare prose ("can you paste X," "grab Y"). This covers ANY manual ask, not just file references:
+retrieving content, pasting output, opening a page, verifying a setting. If Chief has to work
+out *where* or *how* before he can act, the ask was incomplete.
+
+### STD-004: Handoff ledger
+`C:\Users\joelc\Projects\cannonops-vault\Handoff-Status\LEDGER.md` records what work is out
+with an agent and not yet back. Three rules, and each is one action rather than a thing to
+remember separately:
+
+- **Session open:** sweep it and report every `OPEN` and `BLOCKED` row before anything else.
+  `Select-String -Path "C:\Users\joelc\Projects\cannonops-vault\Handoff-Status\LEDGER.md" -Pattern "^\|\s*H-\d+\s*\|\s*(OPEN|BLOCKED)\s*\|"`
+- **Writing a handoff prompt:** add the row in the same action that writes the prompt. A handoff
+  that exists only in chat is invisible to Chief the moment the chat scrolls.
+- **Finishing a handoff:** the step that writes the report into `Handoff-Status/` also flips that
+  row to `DONE` with today's date and the report filename. Same step, not a follow-up.
+
+Format and field rules live in the ledger's own header. It is not a to-do list: `Open-Items.md`
+tracks unresolved *conditions*, the ledger tracks *work packets an agent can be handed*.
+
+### STD-005: Standing rule — build-date marker
 Every user-facing deliverable that can change over time carries a small, visible
 build date in YYMMDD format, generated automatically at build time, never hardcoded
 and never manually updated. Placement is small and unobtrusive.
@@ -26,8 +65,25 @@ form varies by what the repo produces:
 If this repo produces none of those yet, the rule is dormant here, not waived. It
 applies the moment the repo ships something a person sees.
 
-## Handoff ledger
-- **Handoff ledger.** Writing a handoff prompt adds its row in the same action. Finishing one — the step that writes the report into the vault's `Handoff-Status/` — also flips that row to `DONE` with today's date and the report filename. Same step, not a follow-up: a report that lands without closing its row leaves Chief believing the work is still out.
+### STD-006: Session tag
+Every handoff prompt carries a tag [PROJ-SSS-Hn | Ddd MM-DD HH:MM TZ]: project
+code, session number, handoff number within that session, readable stamp. Project
+codes: SYK, GWT, MSG, DCHS, FWL, HRM, KPR, COO, GMU. The Hn counter is the primary
+staleness signal (a handoff number already pasted is stale); the clock is
+secondary. Wall-clock time is read at write time, never guessed or hardcoded.
+Session numbers come from that project's Session-Index.md in cannonops-vault, and
+the row is added at session open, not at close.
+
+Every handoff prompt ends with an output contract as its last line, telling the
+agent to open its reply with [PROJ-SSS-Hn | done <time it read itself>]. Last-line
+placement is deliberate; header placement gets dropped.
+
+Exception, and it is not optional: a handoff that edits global settings, installs
+auto-running code, or otherwise carries real blast radius is written in Chief's own
+words. No orchestrator framing, no output contract, no tag as the outermost
+wrapper. Authorization comes from Chief, not from a tag. An agent that pauses to
+confirm such a request is doing its job.
+<!-- STD:END -->
 
 ## Project
 
@@ -113,7 +169,6 @@ For multi-step tasks, state a brief plan with verification per step. Strong succ
 4. Always include explicit file verification steps — files may be reported as created but not actually written.
 5. Surface all errors immediately. Never silently swallow exceptions.
 6. Wally (Claude Chat) handles planning/architecture. Agent 13 (Claude Code) handles execution only.
-7. Every manual ask of Chief carries a full absolute path or a copy/paste-ready command, never bare prose ("can you paste X," "grab Y"). This covers ANY manual ask, not just file references: retrieving content, pasting output, opening a page, verifying a setting. If Chief has to work out *where* or *how* before he can act, the ask was incomplete.
 
 ## FamilySearch API Rules
 
@@ -249,23 +304,3 @@ High-level only — full names, status, and meeting dates live in `repo-memory.m
 
 - FamilySearch Dev Support: devsupport@familysearch.org
 - FamilySearch contact: Gordon Clarke (clarkegj@churchofjesuschrist.org)
-
-## Session tag
-
-Every handoff prompt carries a tag [PROJ-SSS-Hn | Ddd MM-DD HH:MM TZ]: project
-code, session number, handoff number within that session, readable stamp. Project
-codes: SYK, GWT, MSG, DCHS, FWL, HRM, KPR, COO, GMU. The Hn counter is the primary
-staleness signal (a handoff number already pasted is stale); the clock is
-secondary. Wall-clock time is read at write time, never guessed or hardcoded.
-Session numbers come from that project's Session-Index.md in cannonops-vault, and
-the row is added at session open, not at close.
-
-Every handoff prompt ends with an output contract as its last line, telling the
-agent to open its reply with [PROJ-SSS-Hn | done <time it read itself>]. Last-line
-placement is deliberate; header placement gets dropped.
-
-Exception, and it is not optional: a handoff that edits global settings, installs
-auto-running code, or otherwise carries real blast radius is written in Chief's own
-words. No orchestrator framing, no output contract, no tag as the outermost
-wrapper. Authorization comes from Chief, not from a tag. An agent that pauses to
-confirm such a request is doing its job.
