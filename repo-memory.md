@@ -6,19 +6,24 @@ Single source of truth for current state. Update before every session close.
 
 ## Current State
 
-- **Branch:** `fwl-008-m3-0-eval` (not yet merged to `main`)
-- **Last commit at session close:** see `git log` — FWL-008: M3.0 fixture generator + vision transcription eval, results in `docs/m3-0-eval-note.md`
-- **Tests:** 45 passed, 3 skipped (network integration tests, gated by `RUN_NETWORK_TESTS=1`)
-- **Milestone:** 1 complete (extract + fetch + CLI + Flask review UI). Milestone 2 not started. Milestone 3.0 (fixtures + model eval) complete — see `docs/m3-0-eval-note.md`; M3.1 (ingest/transcribe/review UI build-out) not started.
+- **Branch:** `fwl-010-fs-upload-m2` (not yet merged to `main`; pushed, do not merge without flagging back first per H-020 handoff)
+- **Last commit at session close:** see `git log` — FWL-010: M2.0 FamilySearch OAuth login + M2.1 fs_map/fs_client dry-run layer
+- **Tests:** 81 passed, 3 skipped (network integration tests, gated by `RUN_NETWORK_TESTS=1`)
+- **Milestone:** 1 complete (extract + fetch + CLI + Flask review UI). Milestone 2: **M2.0 (auth) and M2.1 (mapping/client/dry-run) built this session** — see below. M2.2 (match-check + confirm-gate UI) and M2.3 (live writes) not started. Milestone 3.0 (fixtures + model eval) complete; M3.1 not started.
+- **Other unmerged branches (do not tangle with fwl-010):** `fwl-007-design-drafts` (awaiting Joel's own review), `fwl-009-m3-1-scan-path` (no CHANGELOG entry yet).
 - **What works right now:**
   - Paste obituary text or supply a `.txt` file → Claude Haiku extracts structured JSON (deceased + relationships + eulogy + service details).
   - Flask review UI on port 8081: paste/URL → extract → editable review form → approve → JSON saved to `output/`.
   - Production site live at `farwestlegacy.com` (Render auto-deploy on push to main).
   - UptimeRobot keep-alive monitor (ID 802933445, 5min ping) prevents Render free-tier cold starts.
   - M3.0 eval tooling: `make fixtures` (synthetic scan generator), `scripts/m3_eval.py` (Sonnet-vs-Haiku vision transcription eval) — measured, not yet wired into the app.
+  - **FamilySearch OAuth2 + PKCE (`src/fs_auth.py`), routes `GET /auth/login` / `GET /callback` in `src/app.py`, signed-in badge in `templates/base.html`.** `/auth/login` verified locally: produces a correctly-formed authorize redirect to `https://identbeta.familysearch.org/cis-web/oauth2/v3/authorization` with PKCE S256 `code_challenge`, `state`, `redirect_uri`. **Not yet verified end-to-end** — completing a real sign-in requires a human with FamilySearch beta credentials in an actual browser (Incapsula bot-protection blocks headless verification); A13 cannot do this step. See Pending Decisions.
+  - **`src/fs_map.py`** — pure GEDCOM X field mapping (obituary JSON → FS person/relationship/source structures), 24 unit tests covering partial dates, maiden names, suffixes, sibling gating, living-relative default-exclusion/opt-in, "don't guess the other parent" for children.
+  - **`src/fs_client.py`** — `FamilySearchClient` with the dry-run boundary (POST/PUT/DELETE short-circuited, GETs always real), upload journal (`tmp/<id>.upload.json`) for idempotent resume, 429/503 `Retry-After` backoff, 401 → `FSAuthExpiredError`, 4xx halts without retry. 9 tests against `httpx.MockTransport`. `run_upload_sequence()` orchestrates persons → relationships → source → attach per plan §4.2.
+  - Dry-run golden test (`tests/test_fs_upload_dry_run.py`) against the Neese fixture (`tests/fixtures/sample_obituary_01_extracted.json`, hand-authored to match `test_extract.py`'s live-API assertions) produces the expected 20-entry intended-writes journal with zero network calls.
 - **What does not work yet:**
   - URL fetching for online obituaries (see Active Bugs).
-  - FamilySearch OAuth + writes (Milestone 2 — not started).
+  - FamilySearch live writes and match-check/confirm-gate UI (M2.2/M2.3 — no `/upload` route exists yet; not in scope this session).
   - Photo / OCR ingestion pipeline itself (M3.1–M3.5 — M3.0 eval done, `src/ingest.py`/`src/transcribe.py` not built yet).
 
 ---
@@ -79,6 +84,7 @@ Three-tier setup:
 - **002b (2026-04-26)** — Tech debt + Render-first pivot: `src/app.py` deduplication, `FLASK_SECRET_KEY` env-var support, MacBook demo deprecation, URL fetch failures captured in `tests/fixtures/url_fetch_failures.md`. Commit `f0ce280`.
 - **003 (2026-04-27) — Website Wording + Render Auto-Deploy Fix:** Softened hero claim and "What it does" paragraph in `templates/home.html` to reflect sandbox-only status. Added FS API attribution + Intellectual Reserve trademark notice to footer in `templates/base.html`. Tests: 30 passed, 3 skipped. Diagnosed and fixed Render auto-deploy: GitHub App was installed on personal `joelcannon` account but not on `cannon-ops` org — installed at org level (single-repo scope). UptimeRobot monitor 802933445 created (5-min keep-alive). Three-pass workflow discipline (recon → diff → execute) formalized across all Cannon Ops projects. Note: this FWL 003 (2026-04-27) is distinct from the earlier Session 003/003a (2026-04-18, MacBook demo scripts, now deprecated). Future sessions adopt date-disambiguating labels. Commit `00f033f`.
 - **FWL-006 / FWL-007 (2026-07-10) — Design drafts:** `planning/familysearch-upload-plan.md` (FamilySearch profile-upload integration plan) and `docs/obituary-pipeline-DRAFT.md` + `docs/familysearch-integration-DRAFT.md` (scanned-obituary pipeline design, Milestone 3 phased plan M3.0–M3.5). No code. Commits `f47e454`, `906f331`.
+- **FWL-010 / Session 010 (2026-08-08) — M2.0 FamilySearch OAuth + M2.1 mapping/client/dry-run:** Built against `planning/familysearch-upload-plan.md` §1, 2, 4, 5 without waiting on the Gordon Clarke orientation call (used the plan's documented fallbacks: PKCE S256 by default, scope names deferred to first live handshake). `src/fs_auth.py` (authorize-URL builder, PKCE, token exchange, current-user fetch, server-side session store keyed off a Flask-session id — never the raw token in the cookie), `/auth/login` + `/callback` routes and signed-in badge in `src/app.py` / `templates/base.html`. `src/fs_map.py` (pure GEDCOM X mapping) and `src/fs_client.py` (journal + dry-run boundary + write-sequence orchestration), both with unit tests, plus an offline golden-file dry-run test against the Neese fixture. Confirmed live via WebFetch/WebSearch against developers.familysearch.org (not from memory): authorize endpoint `https://identbeta.familysearch.org/cis-web/oauth2/v3/authorization` (GET/POST, params `client_id`/`response_type`/`redirect_uri`/`state`/`scope`/`code_challenge`/`code_challenge_method`), token endpoint `https://identbeta.familysearch.org/cis-web/oauth2/v3/token` (`grant_type=authorization_code`, `code_verifier`, no secret), current-user resource `https://apibeta.familysearch.org/platform/users/current`. Removed the vestigial `FAMILYSEARCH_CLIENT_SECRET` from `.env`/`.env.example` and the commented-out `authlib` line from `requirements.txt` per the plan's M2.0 decision to hand-roll OAuth. Tests: 81 passed, 3 skipped (up from 45+3; all 36 new tests are FS-layer, offline). **Live handshake / scope capture still open** — see Pending Decisions.
 - **FWL-008 / Session 008 (2026-07-11) — M3.0 fixture generator + vision transcription eval:** Built `scripts/gen_fixtures.py` (synthetic scan fixtures, `make fixtures`), `scripts/m3_eval.py` (Sonnet 5 vs. Haiku 4.5 transcription eval: resolution-knee matrix, segmentation-probe accuracy, PDF-vs-per-page comparison), `scripts/eval_metrics.py` (CER/WER/IoU), `prompts/obituary_transcribe.md`. Ran the full eval against synthetic fixtures (~$0.39 API spend). Results and chosen defaults in `docs/m3-0-eval-note.md`: Haiku 4.5 @ 1568px long edge is the default transcription tier (reaches CER parity with Sonnet at ≥1092px, ~2–3× cheaper); crop-then-transcribe confirmed over full-page name-targeted for segmentation; per-page image ingest kept over native PDF input (PDF tested only the trivial one-obit-per-page case). Tests: 45 passed, 3 skipped. Open questions needing real (non-synthetic) samples remain: pre-1930 newsprint (open q.6), handwritten material (open q.3, out of scope).
 
 ---
@@ -105,6 +111,7 @@ Three-tier setup:
 - **Tri-County email send** — outreach email drafted; send pending Joel's go-ahead.
 - **Mid-West Genealogy Center collaboration scope** — what does "rebrand for library patrons" actually look like? White-label? Co-branded? Hosted by them?
 - **Matthew Johnson scope + pricing** — what's the offering, what's the price, what does the archivist team actually need? Meeting 2026-04-27.
+- **FamilySearch OAuth scope names + live sign-in verification (M2.0)** — `/auth/login` produces a correctly-formed authorize redirect (verified 2026-08-08), but completing the handshake requires a human signing into a real FamilySearch beta account in an actual browser (identbeta.familysearch.org is behind Incapsula bot-protection, so this can't be verified headlessly). **Action needed from Joel:** run `.venv\Scripts\activate` then `python -m src.app`, open `http://localhost:8081/auth/login`, sign in with a FamilySearch beta-environment account, confirm the header badge shows the FS display name, then check the app log (footer "Logs" button, or `python -m src.app` console) for the `FamilySearch OAuth token granted. scope=...` line and paste the `scope=` value back so it can be recorded here and in `.env` as `FAMILYSEARCH_SCOPE`. Also still pending from the Gordon Clarke call (not scheduled yet): PKCE-required confirmation, beta tree reset cadence, production redirect URI process, sibling-modeling confirmation, living-person private-space behavior, Compatibility Review criteria, refresh-token behavior.
 
 ---
 
@@ -126,9 +133,9 @@ All set in `.env` at repo root (template: `.env.example`). Never committed.
 | --- | --- |
 | `ANTHROPIC_API_KEY` | Claude API key (BYOK — user-supplied). Used by `src/extract.py`. |
 | `FAMILYSEARCH_CLIENT_ID` | FamilySearch beta AppKey (currently `b00T623K88QL2ZON6BEF`). |
-| `FAMILYSEARCH_CLIENT_SECRET` | FamilySearch OAuth client secret. |
 | `FAMILYSEARCH_REDIRECT_URI` | OAuth callback URL. Beta is registered for `http://localhost:8081/callback` and the `farwestlegacy.com` realm. |
 | `FAMILYSEARCH_ENV` | `beta` for development (was `integration` in template — beta is the correct value now). |
+| `FAMILYSEARCH_SCOPE` | Space-delimited OAuth scope names for `/auth/login`. Blank until confirmed via a live sign-in (see Pending Decisions) — FamilySearch grants the AppKey's default scope when omitted. Added FWL-010 (2026-08-08); `FAMILYSEARCH_CLIENT_SECRET` removed the same session (vestigial — public client, no secret). |
 | `FLASK_PORT` | Flask bind port. Defaults to `8081`. (Production on Render uses `$PORT` from gunicorn, not `FLASK_PORT`.) |
 | `FLASK_ENV` | Set to `production` on Render. Unset locally. |
 | `PYTHON_VERSION` | Render-only: `3.12.4`. |
@@ -139,7 +146,7 @@ All set in `.env` at repo root (template: `.env.example`). Never committed.
 ## External Dependencies
 
 - **Anthropic API** — Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) for text extraction. `max_tokens=4096`. Sonnet planned for vision/photo OCR (Milestone 3).
-- **FamilySearch beta** — AppKey `b00T623K88QL2ZON6BEF`. Registered redirect URI `http://localhost:8081/callback`. `farwestlegacy.com` realm registered. Compatibility Review required before production.
+- **FamilySearch beta** — AppKey `b00T623K88QL2ZON6BEF`. Registered redirect URI `http://localhost:8081/callback`. `farwestlegacy.com` realm registered. Compatibility Review required before production. Confirmed hosts (2026-08-08): identity `identbeta.familysearch.org` (authorize + token, `/cis-web/oauth2/v3/{authorization,token}`), API `apibeta.familysearch.org` (current-user `/platform/users/current`; tree/source paths per `src/fs_client.py`, unverified against live docs until M2.3). Public client — no client secret.
 - **Domain registrar** — Cloudflare (`farwestlegacy.com`).
 - **Hosting platform (production)** — **Render** (free plan, Oregon). Blueprint: `render.yaml`. Auto-deploys on push to `main`. Service: `far-west-legacy`. Runs `gunicorn -w 2 -b 0.0.0.0:$PORT src.app:app`.
 - **Tailscale** — _(formerly used for MacBook demo access; see deprecated section under Deployment Topology)_.

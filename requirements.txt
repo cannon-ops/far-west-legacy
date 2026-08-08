@@ -18,6 +18,3 @@ pytest>=8.0
 # Code quality
 ruff>=0.5
 black>=24.0
-
-# FamilySearch API (OAuth)
-# authlib>=1.3  # uncomment when building OAuth flow

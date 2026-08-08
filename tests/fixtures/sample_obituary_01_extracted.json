@@ -1,0 +1,32 @@
+{
+  "deceased": {
+    "given_names": "Donna Sue",
+    "surname": "Neese",
+    "maiden_name": "",
+    "suffix": "",
+    "gender": "Female",
+    "birth_date": "1939-07-25",
+    "birth_place": "Jamesport, Missouri",
+    "death_date": "2025-12-10",
+    "death_place": "Pleasant Valley, Missouri",
+    "burial_place": ""
+  },
+  "relationships": {
+    "spouses": [],
+    "parents": [
+      {"given_names": "Andrew", "surname": "Neese", "maiden_name": "", "deceased": true},
+      {"given_names": "Nellie", "surname": "Neese", "maiden_name": "Walker", "deceased": true}
+    ],
+    "children": [],
+    "siblings": [
+      {"given_names": "Mavis", "surname": "Neese", "maiden_name": "", "deceased": true},
+      {"given_names": "Melvin", "surname": "Neese", "maiden_name": "", "deceased": true},
+      {"given_names": "Marion", "surname": "Neese", "maiden_name": "", "deceased": true},
+      {"given_names": "Allen", "surname": "Hunt", "maiden_name": "", "deceased": true}
+    ]
+  },
+  "eulogy_text": "Donna was born July 25, 1939, in Jamesport, the daughter of Andrew and Nellie (Walker) Neese. She graduated from Jamesport High School and spent much of her life helping her brother, Mavis Neese, on the family farm. Donna was a hardworking, gentle soul. Timid by nature, yet deeply caring, she had a special love for children and animals and often took in strays who needed a safe place. Her quiet compassion and steadfast faith in Christ guided her life and touched those around her.",
+  "service_details": "",
+  "source_url": "",
+  "raw_text": "Donna Sue Neese, age 86, a lifelong resident of Jamesport, Missouri, passed away Wednesday morning, December 10, 2025, at Pleasant Valley Manor Care in Pleasant Valley, Missouri. Donna was born July 25, 1939, in Jamesport, the daughter of Andrew and Nellie (Walker) Neese. She graduated from Jamesport High School and spent much of her life helping her brother, Mavis Neese, on the family farm. Donna was a hardworking, gentle soul. Timid by nature, yet deeply caring, she had a special love for children and animals and often took in strays who needed a safe place. Her quiet compassion and steadfast faith in Christ guided her life and touched those around her. Donna will be dearly missed by her family and friends. Donna was preceded in death by her parents; siblings, Mavis Neese, Melvin Neese, Marion Neese, and Allen Hunt; a niece, Elizabeth Ann Hunt; a great-nephew, Cingen James Hunt; and a nephew, Todd Hunt."
+}

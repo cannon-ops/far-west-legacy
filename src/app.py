@@ -23,8 +23,9 @@ _project_root = Path(__file__).parent.parent
 if str(_project_root) not in sys.path:
     sys.path.insert(0, str(_project_root))
 
-from flask import Flask, jsonify, redirect, render_template, request, url_for
+from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 
+from src import fs_auth
 from src.extract import ExtractionError, extract_from_text
 from src.fetch import FetchError, fetch_obituary_text
 from src.version import APP_VERSION, CHANGELOG_TEXT
@@ -237,12 +238,67 @@ def approve(job_id: str):
 
 
 # ---------------------------------------------------------------------------
+# FWL 010 routes: FamilySearch OAuth2 sign-in (M2.0)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/auth/login")
+def auth_login():
+    client_id = os.getenv("FAMILYSEARCH_CLIENT_ID", "")
+    redirect_uri = os.getenv("FAMILYSEARCH_REDIRECT_URI", "")
+    if not client_id or not redirect_uri:
+        return "FamilySearch OAuth is not configured (missing FAMILYSEARCH_CLIENT_ID / FAMILYSEARCH_REDIRECT_URI).", 500
+
+    url, state = fs_auth.build_authorize_url(client_id, redirect_uri)
+    session["fs_oauth_state"] = state
+    return redirect(url)
+
+
+@app.get("/callback")
+def auth_callback():
+    fs_error = request.args.get("error")
+    if fs_error:
+        record_activity("fs_auth_error", error=fs_error, description=request.args.get("error_description", ""))
+        return render_template("index.html", error=f"FamilySearch sign-in failed: {fs_error}")
+
+    state = request.args.get("state", "")
+    code = request.args.get("code", "")
+    expected_state = session.pop("fs_oauth_state", None)
+    if not code or not state or state != expected_state:
+        record_activity("fs_auth_error", error="state_mismatch")
+        return render_template("index.html", error="FamilySearch sign-in failed: invalid state.")
+
+    client_id = os.getenv("FAMILYSEARCH_CLIENT_ID", "")
+    try:
+        token = fs_auth.exchange_code(client_id, code, state)
+        user_data = fs_auth.fetch_current_user(token["access_token"])
+    except fs_auth.FSAuthError as exc:
+        record_activity("fs_auth_error", error=str(exc))
+        return render_template("index.html", error=f"FamilySearch sign-in failed: {exc}")
+
+    display_name = fs_auth.display_name_from_user_response(user_data)
+    sid = session.get("fs_sid") or uuid.uuid4().hex
+    session["fs_sid"] = sid
+    fs_auth.store_session(sid, token, display_name)
+
+    record_activity("fs_auth_ok", display_name=display_name, scope=token.get("scope", ""))
+    return redirect(url_for("tool"))
+
+
+# ---------------------------------------------------------------------------
 # FWL 005 routes: version banner + logs modal
 # ---------------------------------------------------------------------------
 
 @app.context_processor
 def inject_version():
     return {"app_version": APP_VERSION}
+
+
+@app.context_processor
+def inject_fs_user():
+    sid = session.get("fs_sid")
+    fs_session = fs_auth.get_session(sid) if sid else None
+    return {"fs_display_name": fs_session["display_name"] if fs_session else None}
 
 
 @app.route("/changelog")

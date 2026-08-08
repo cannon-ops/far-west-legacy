@@ -5,6 +5,37 @@ Format: session number, date, milestone label, summary of changes.
 
 ---
 
+## Session 010 (2026-08-08) — M2.0 FamilySearch OAuth + M2.1 Mapping/Client/Dry-Run
+
+**Version: 0.6.0**
+
+- `src/fs_auth.py` — OAuth2 authorization-code + PKCE (S256) flow for FamilySearch's public
+  client, hand-rolled (no `authlib`). Server-side token store keyed off a Flask-session id;
+  the raw access token never touches the session cookie.
+- `GET /auth/login` / `GET /callback` routes in `src/app.py`; signed-in badge (FS display
+  name) or a sign-in link in the header (`templates/base.html`)
+- `src/fs_map.py` — pure GEDCOM X mapping from FWL extraction JSON to FamilySearch person/
+  relationship/source structures (plan §2): partial-date formal-date conversion, maiden-name
+  second `BirthName`, suffix handling, living-relative default-exclusion with opt-in,
+  sibling gating on parents having been included in the plan, "don't guess the other parent"
+  for children. 24 unit tests, no network.
+- `src/fs_client.py` — `FamilySearchClient`: dry-run boundary (writes captured, reads real),
+  upload journal for idempotent resume, 429/503 `Retry-After` backoff, 401 → re-auth signal,
+  4xx halts without retry; `run_upload_sequence()` orchestrates the persons → relationships →
+  source → attach write sequence (plan §4.2). 9 tests against `httpx.MockTransport`.
+- Offline golden-file dry-run test against the Neese fixture, producing the expected
+  20-entry intended-writes journal with zero network calls
+- Confirmed live (WebFetch/WebSearch against developers.familysearch.org, not from memory):
+  authorize/token hosts on `identbeta.familysearch.org`, current-user resource on
+  `apibeta.familysearch.org`
+- Removed vestigial `FAMILYSEARCH_CLIENT_SECRET` (`.env`, `.env.example`) and the
+  commented-out `authlib` line in `requirements.txt` — M2.0 decided to hand-roll OAuth
+- Tests: 81 passed, 3 skipped (up from 45+3)
+- Live sign-in handshake (scope-name capture) still needs a human FamilySearch login —
+  see `repo-memory.md` Pending Decisions
+
+---
+
 ## Session 008 (2026-07-11) — M3.0 Vision Transcription Eval
 
 - `scripts/gen_fixtures.py` — synthetic scan fixture generator (Pillow): clean/degraded/
