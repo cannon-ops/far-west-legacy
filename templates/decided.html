@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Decisions Recorded — Far West Legacy{% endblock %}
+
+{% block content %}
+<div class="card confirmed-box">
+  <div class="checkmark">&#10003;</div>
+  <h2 style="color: #166534;">Decisions Recorded</h2>
+  <p>Every person in this obituary has a decision on file.</p>
+  <p style="margin-top:0.75rem;">Live writes to FamilySearch (M2.3) are not built yet &mdash; nothing has been sent to FamilySearch. These decisions will be used once that lands.</p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">Decisions</h3>
+  <table style="width:100%; border-collapse: collapse; font-family:sans-serif; font-size:0.9rem;">
+    <thead>
+      <tr style="text-align:left; border-bottom: 1px solid var(--border);">
+        <th style="padding:0.4rem 0.5rem;">Person</th>
+        <th style="padding:0.4rem 0.5rem;">Decision</th>
+        <th style="padding:0.4rem 0.5rem;">Existing PID</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for key, d in decisions.items() %}
+      <tr style="border-bottom: 1px solid var(--border);">
+        <td style="padding:0.4rem 0.5rem;">{{ key }}</td>
+        <td style="padding:0.4rem 0.5rem;">{{ d.decision.replace('_', ' ') }}</td>
+        <td style="padding:0.4rem 0.5rem;">{{ d.existing_pid or "—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="form-actions" style="border-top: none; padding-top: 0;">
+  <a href="/tool" class="btn btn-primary">Extract Another Obituary</a>
+</div>
+{% endblock %}

@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-APP_VERSION = "0.6.0"
+APP_VERSION = "0.7.0"
 
 _CHANGELOG_PATH = Path(__file__).parent.parent / "CHANGELOG.md"
 

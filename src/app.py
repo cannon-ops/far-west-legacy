@@ -2,11 +2,14 @@
 app.py — Flask review UI for the Far West Legacy obituary extraction pipeline.
 
 Routes:
-  GET  /                  — marketing homepage (farwestlegacy.com landing)
-  GET  /tool              — paste/URL input form
-  POST /extract           — run extraction, redirect to review
-  GET  /review/<job_id>   — editable review form
-  POST /approve/<job_id>  — save approved JSON to output/
+  GET  /                        — marketing homepage (farwestlegacy.com landing)
+  GET  /tool                    — paste/URL input form
+  POST /extract                 — run extraction, redirect to review
+  GET  /review/<job_id>         — editable review form
+  POST /approve/<job_id>        — save approved JSON to output/
+  GET  /auth/login, /callback   — FamilySearch OAuth2 sign-in (M2.0)
+  GET  /upload/<job_id>         — match-check + confirm-gate screen (M2.2)
+  POST /upload/<job_id>/decide  — record per-person decisions (M2.2)
 """
 
 import json
@@ -25,9 +28,10 @@ if str(_project_root) not in sys.path:
 
 from flask import Flask, jsonify, redirect, render_template, request, session, url_for
 
-from src import fs_auth
+from src import fs_auth, fs_map
 from src.extract import ExtractionError, extract_from_text
 from src.fetch import FetchError, fetch_obituary_text
+from src.fs_client import FamilySearchClient, FSAuthExpiredError, FSClientError
 from src.version import APP_VERSION, CHANGELOG_TEXT
 
 app = Flask(__name__, template_folder="../templates")
@@ -36,6 +40,18 @@ app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-in-prod")
 BASE_DIR = Path(__file__).parent.parent
 TMP_DIR = BASE_DIR / "tmp"
 OUTPUT_DIR = BASE_DIR / "output"
+
+# Gates the /upload/* routes per plan §0 ("gate all upload routes ... so prod
+# deploys are unaffected") — the registered redirect_uri is localhost-only, so
+# this feature only ever works on Dev. Default off.
+FWL_FS_UPLOAD_ENABLED = os.getenv("FWL_FS_UPLOAD_ENABLED", "0").strip().lower() not in ("", "0", "false")
+FWL_FS_DRY_RUN = os.getenv("FWL_FS_DRY_RUN", "0").strip().lower() not in ("", "0", "false")
+
+# Full record detail opens on FamilySearch.org per the API-terms rule in CLAUDE.md —
+# the in-app panel only ever shows the search-result summary (plan §3.2).
+FS_PERSON_LINK_BASE = "https://www.familysearch.org/tree/person/details/"
+
+ROLE_TO_REL_KEY = {"spouse": "spouses", "parent": "parents", "child": "children", "sibling": "siblings"}
 
 # ---------------------------------------------------------------------------
 # In-memory log buffers (FWL 005)
@@ -231,10 +247,11 @@ def approve(job_id: str):
     out_path = OUTPUT_DIR / filename
     out_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    # Clean up tmp file
-    tmp.unlink(missing_ok=True)
+    # Keep tmp/<job_id>.json alive (now holding the approved data, not the raw
+    # extraction) so /upload/<job_id> (M2.2) can load it after approval.
+    tmp.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
 
-    return render_template("confirmed.html", filename=filename, out_path=str(out_path), data=result)
+    return render_template("confirmed.html", job_id=job_id, filename=filename, out_path=str(out_path), data=result)
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +268,9 @@ def auth_login():
 
     url, state = fs_auth.build_authorize_url(client_id, redirect_uri)
     session["fs_oauth_state"] = state
+    logging.getLogger("src.app").info(
+        "FamilySearch authorize redirect built. pkce=%s", fs_auth.DEFAULT_USE_PKCE
+    )
     return redirect(url)
 
 
@@ -286,6 +306,113 @@ def auth_callback():
 
 
 # ---------------------------------------------------------------------------
+# FWL 010 routes: match-check + confirm-gate (M2.2)
+# ---------------------------------------------------------------------------
+
+
+def _decisions_path(job_id: str) -> Path:
+    return TMP_DIR / f"{job_id}.decisions.json"
+
+
+def _plan_person_label(key: str, data: dict) -> dict:
+    """Friendly name/lifespan for a fs_map plan person key, read from the original
+    (not GEDCOM X) extraction data so it matches what the user reviewed/approved."""
+    if key == "subject":
+        person = data.get("deceased", {})
+    else:
+        role, _, idx = key.rpartition("_")
+        rel_list = data.get("relationships", {}).get(ROLE_TO_REL_KEY.get(role, ""), [])
+        person = rel_list[int(idx)] if idx.isdigit() and int(idx) < len(rel_list) else {}
+
+    given = person.get("given_names", "")
+    surname = person.get("surname", "")
+    birth_year = (person.get("birth_date") or "")[:4]
+    death_year = (person.get("death_date") or "")[:4]
+    lifespan = f"{birth_year or '?'}–{death_year or '?'}" if (birth_year or death_year) else ""
+    return {"name": f"{given} {surname}".strip() or "(unnamed)", "lifespan": lifespan}
+
+
+@app.get("/upload/<job_id>")
+def upload_match_check(job_id: str):
+    if not FWL_FS_UPLOAD_ENABLED:
+        return "FamilySearch upload is not enabled on this deployment.", 404
+
+    tmp = _tmp_path(job_id)
+    if not tmp.exists():
+        return redirect(url_for("tool"))
+
+    sid = session.get("fs_sid")
+    fs_session = fs_auth.get_session(sid) if sid else None
+    if not fs_session:
+        return redirect(url_for("auth_login"))
+
+    data = json.loads(tmp.read_text(encoding="utf-8"))
+    plan = fs_map.map_extraction_to_plan(data)
+
+    client = FamilySearchClient(
+        access_token=fs_session["token"]["access_token"],
+        dry_run=FWL_FS_DRY_RUN,
+        journal_path=TMP_DIR / f"{job_id}.upload.json",
+    )
+    persons = []
+    try:
+        for key, person_body in plan["persons"].items():
+            label = _plan_person_label(key, data)
+            candidates = client.search_matches(person_body)
+            persons.append({
+                "key": key,
+                "name": label["name"],
+                "lifespan": label["lifespan"],
+                "candidates": candidates,
+                "has_strong_or_possible": any(c["bucket"] in ("strong", "possible") for c in candidates),
+            })
+    except FSAuthExpiredError:
+        return redirect(url_for("auth_login"))
+    except FSClientError as exc:
+        record_activity("fs_match_error", job_id=job_id, error=str(exc))
+        return render_template("index.html", error=f"FamilySearch match search failed: {exc}")
+    finally:
+        client.close()
+
+    return render_template(
+        "upload.html",
+        job_id=job_id,
+        persons=persons,
+        skipped=plan["skipped"],
+        person_link_base=FS_PERSON_LINK_BASE,
+        dry_run=FWL_FS_DRY_RUN,
+    )
+
+
+@app.post("/upload/<job_id>/decide")
+def upload_decide(job_id: str):
+    if not FWL_FS_UPLOAD_ENABLED:
+        return "FamilySearch upload is not enabled on this deployment.", 404
+
+    tmp = _tmp_path(job_id)
+    if not tmp.exists():
+        return redirect(url_for("tool"))
+
+    data = json.loads(tmp.read_text(encoding="utf-8"))
+    plan = fs_map.map_extraction_to_plan(data)
+
+    decisions = {}
+    for key in plan["persons"]:
+        decision = request.form.get(f"decision_{key}", "").strip()
+        existing_pid = request.form.get(f"existing_pid_{key}", "").strip()
+        if decision not in ("use_existing", "create_new", "skip"):
+            return render_template("index.html", error=f"Missing or invalid decision for {key} — every person must be decided before committing.")
+        if decision == "use_existing" and not existing_pid:
+            return render_template("index.html", error=f"'{key}' is set to Use Existing but no candidate PID was selected.")
+        decisions[key] = {"decision": decision, "existing_pid": existing_pid if decision == "use_existing" else None}
+
+    _decisions_path(job_id).write_text(json.dumps(decisions, indent=2), encoding="utf-8")
+    record_activity("fs_decisions_recorded", job_id=job_id, decisions=decisions)
+
+    return render_template("decided.html", job_id=job_id, decisions=decisions)
+
+
+# ---------------------------------------------------------------------------
 # FWL 005 routes: version banner + logs modal
 # ---------------------------------------------------------------------------
 
@@ -299,6 +426,11 @@ def inject_fs_user():
     sid = session.get("fs_sid")
     fs_session = fs_auth.get_session(sid) if sid else None
     return {"fs_display_name": fs_session["display_name"] if fs_session else None}
+
+
+@app.context_processor
+def inject_fs_upload_enabled():
+    return {"fs_upload_enabled": FWL_FS_UPLOAD_ENABLED}
 
 
 @app.route("/changelog")

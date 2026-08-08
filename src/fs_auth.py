@@ -6,6 +6,13 @@ Beta identity server confirmed live (2026-08-08, see repo-memory.md):
   user:      https://apibeta.familysearch.org/platform/users/current
 
 No client secret — FWL is a public client (AppKey only). PKCE S256 by default.
+
+A live sign-in against this beta AppKey failed with "Invalid Oauth2 Request — unable
+to authenticate client" (2026-08-08, see repo-memory.md Pending Decisions). PKCE
+support on this specific AppKey was never confirmed (plan §9 open question 2), so
+FAMILYSEARCH_USE_PKCE is a diagnostic toggle to isolate whether PKCE is the cause.
+Default is PKCE-on (correct posture for a public client) — set to 0 only to run the
+isolation test, never as a standing default.
 """
 
 import base64
@@ -31,6 +38,10 @@ CURRENT_USER_PATH = "/platform/users/current"
 # confirmed (see plan §1 agenda item 1 / repo-memory.md).
 DEFAULT_SCOPE = os.getenv("FAMILYSEARCH_SCOPE", "")
 
+# Diagnostic toggle (see module docstring). "0"/"false" disables PKCE for isolation
+# testing against the auth failure; any other value (including unset) keeps it on.
+DEFAULT_USE_PKCE = os.getenv("FAMILYSEARCH_USE_PKCE", "1").strip().lower() not in ("0", "false")
+
 # Server-side stores, never put tokens in the (signed but unencrypted) Flask session
 # cookie. Module-level dict is fine for single-process local dev only (see plan §4.1).
 _PENDING: dict[str, dict] = {}
@@ -51,20 +62,27 @@ def _new_pkce_pair() -> tuple[str, str]:
     return verifier, challenge
 
 
-def build_authorize_url(client_id: str, redirect_uri: str) -> tuple[str, str]:
+def build_authorize_url(client_id: str, redirect_uri: str, use_pkce: bool | None = None) -> tuple[str, str]:
     """Return (authorize_url, state). Caller must persist `state` and match it on /callback."""
-    state = secrets.token_urlsafe(24)
-    verifier, challenge = _new_pkce_pair()
-    _PENDING[state] = {"code_verifier": verifier, "redirect_uri": redirect_uri}
+    if use_pkce is None:
+        use_pkce = DEFAULT_USE_PKCE
 
+    state = secrets.token_urlsafe(24)
     params = {
         "response_type": "code",
         "client_id": client_id,
         "redirect_uri": redirect_uri,
         "state": state,
-        "code_challenge": challenge,
-        "code_challenge_method": "S256",
     }
+
+    if use_pkce:
+        verifier, challenge = _new_pkce_pair()
+        _PENDING[state] = {"code_verifier": verifier, "redirect_uri": redirect_uri}
+        params["code_challenge"] = challenge
+        params["code_challenge_method"] = "S256"
+    else:
+        _PENDING[state] = {"code_verifier": None, "redirect_uri": redirect_uri}
+
     if DEFAULT_SCOPE:
         params["scope"] = DEFAULT_SCOPE
 
@@ -77,15 +95,18 @@ def exchange_code(client_id: str, code: str, state: str) -> dict:
     if pending is None:
         raise FSAuthError("Unknown or expired OAuth state — restart sign-in at /auth/login")
 
+    data = {
+        "grant_type": "authorization_code",
+        "client_id": client_id,
+        "code": code,
+        "redirect_uri": pending["redirect_uri"],
+    }
+    if pending["code_verifier"] is not None:
+        data["code_verifier"] = pending["code_verifier"]
+
     resp = httpx.post(
         f"{IDENT_HOST}{TOKEN_PATH}",
-        data={
-            "grant_type": "authorization_code",
-            "client_id": client_id,
-            "code": code,
-            "redirect_uri": pending["redirect_uri"],
-            "code_verifier": pending["code_verifier"],
-        },
+        data=data,
         headers={"Accept": "application/json"},
         timeout=15.0,
     )

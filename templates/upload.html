@@ -1,0 +1,180 @@
+{% extends "base.html" %}
+{% block title %}FamilySearch Match Check — Far West Legacy{% endblock %}
+
+{% block head %}
+<style>
+  .match-person { margin-bottom: 1.5rem; }
+  .match-person h3 { display: flex; align-items: baseline; gap: 0.5rem; }
+  .match-person .lifespan { font-family: sans-serif; font-size: 0.85rem; color: var(--muted); font-weight: normal; }
+  .match-candidate {
+    display: grid;
+    grid-template-columns: auto 1fr auto auto;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 0.4rem;
+    font-family: sans-serif;
+    font-size: 0.9rem;
+  }
+  .bucket {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .bucket-strong { background: #fdf0f0; color: var(--danger); }
+  .bucket-possible { background: #fff7e6; color: #92600a; }
+  .bucket-weak { background: var(--accent-light); color: var(--muted); }
+  .decision-row {
+    display: flex;
+    gap: 1.25rem;
+    align-items: center;
+    font-family: sans-serif;
+    font-size: 0.9rem;
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+  }
+  .decision-row label { display: flex; align-items: center; gap: 0.35rem; text-transform: none; letter-spacing: normal; color: var(--text); margin-bottom: 0; }
+  .decision-row input[type="radio"] { width: auto; }
+  .person-status { font-family: sans-serif; font-size: 0.8rem; color: var(--muted); margin-left: 0.5rem; }
+  .person-status.is-ok { color: #166534; }
+  .no-matches { font-family: sans-serif; font-size: 0.85rem; color: var(--muted); font-style: italic; margin-bottom: 0.5rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h2>FamilySearch Match Check</h2>
+<p style="font-family:sans-serif; font-size:0.85rem; color:var(--muted); margin-bottom:1rem;">
+  {% if dry_run %}<strong>DRY RUN mode.</strong> {% endif %}
+  For each person below, choose whether to attach to an existing FamilySearch person, create a new one, or skip them. Every person needs a decision before you can commit &mdash; nothing is written to FamilySearch until then.
+</p>
+
+<form method="post" action="/upload/{{ job_id }}/decide" id="upload-form">
+  <div class="card">
+    {% for person in persons %}
+    <div class="match-person" data-person-key="{{ person.key }}">
+      <h3>
+        {{ person.name }}
+        {% if person.lifespan %}<span class="lifespan">{{ person.lifespan }}</span>{% endif %}
+        <span class="person-status" data-status-for="{{ person.key }}"></span>
+      </h3>
+
+      {% if person.candidates %}
+        {% for c in person.candidates %}
+        <div class="match-candidate">
+          <span class="bucket bucket-{{ c.bucket }}">{{ c.bucket }}</span>
+          <span>{{ c.name }}{% if c.lifespan %} &bull; {{ c.lifespan }}{% endif %}{% if c.pid %} &bull; PID {{ c.pid }}{% endif %}</span>
+          {% if c.pid %}<a href="{{ person_link_base }}{{ c.pid }}" target="_blank" rel="noopener" class="btn btn-secondary" style="padding:0.2rem 0.6rem; font-size:0.8rem;">View on FamilySearch.org</a>{% endif %}
+          <span></span>
+        </div>
+        {% endfor %}
+      {% else %}
+        <p class="no-matches">No candidate matches found.</p>
+      {% endif %}
+
+      <div class="decision-row" data-decision-group="{{ person.key }}">
+        {% if person.candidates %}
+        <label>
+          <input type="radio" name="decision_{{ person.key }}" value="use_existing" data-existing-select="{{ person.key }}">
+          Use existing
+          <select name="existing_pid_{{ person.key }}" data-existing-pid="{{ person.key }}" disabled>
+            <option value="">Select candidate&hellip;</option>
+            {% for c in person.candidates %}
+            <option value="{{ c.pid }}">{{ c.name }} ({{ c.bucket }})</option>
+            {% endfor %}
+          </select>
+        </label>
+        {% endif %}
+        <label>
+          <input type="radio" name="decision_{{ person.key }}" value="create_new"
+            {% if not person.has_strong_or_possible %}checked{% endif %}>
+          Create new
+        </label>
+        <label>
+          <input type="radio" name="decision_{{ person.key }}" value="skip">
+          Skip
+        </label>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% if skipped %}
+  <div class="card">
+    <h3 style="margin-top:0">Not written to the tree</h3>
+    <ul style="font-family:sans-serif; font-size:0.85rem; color:var(--muted); padding-left:1.25rem;">
+      {% for s in skipped %}
+      <li>{{ s.role }} &mdash; {{ s.reason }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  <div class="form-actions">
+    <button type="submit" class="btn btn-primary" id="commit-btn" disabled>Commit Decisions</button>
+    <a href="/tool" class="btn btn-secondary">Start Over</a>
+  </div>
+</form>
+
+<script>
+(function () {
+  const form = document.getElementById('upload-form');
+  const commitBtn = document.getElementById('commit-btn');
+  const groups = Array.from(form.querySelectorAll('[data-decision-group]'));
+
+  // Enable/disable the "existing" candidate <select> to match its radio.
+  form.querySelectorAll('[data-existing-select]').forEach(function (radio) {
+    radio.addEventListener('change', function () {
+      const key = radio.dataset.existingSelect;
+      const select = form.querySelector('[data-existing-pid="' + key + '"]');
+      if (select) select.disabled = !radio.checked;
+    });
+  });
+  form.querySelectorAll('input[type="radio"]').forEach(function (radio) {
+    radio.addEventListener('change', function () {
+      const group = radio.closest('[data-decision-group]');
+      if (radio.value !== 'use_existing') {
+        const select = group.querySelector('select');
+        if (select) { select.disabled = true; select.value = ''; }
+      }
+      updateStatus();
+    });
+  });
+  form.querySelectorAll('select[data-existing-pid]').forEach(function (select) {
+    select.addEventListener('change', updateStatus);
+  });
+
+  function groupIsDecided(group) {
+    const checked = group.querySelector('input[type="radio"]:checked');
+    if (!checked) return false;
+    if (checked.value === 'use_existing') {
+      const select = group.querySelector('select');
+      return !!(select && select.value);
+    }
+    return true;
+  }
+
+  function updateStatus() {
+    let allDecided = true;
+    groups.forEach(function (group) {
+      const key = group.dataset.decisionGroup;
+      const statusEl = form.querySelector('[data-status-for="' + key + '"]');
+      const decided = groupIsDecided(group);
+      if (!decided) allDecided = false;
+      if (statusEl) {
+        statusEl.textContent = decided ? '✓ decided' : 'decision needed';
+        statusEl.classList.toggle('is-ok', decided);
+      }
+    });
+    commitBtn.disabled = !allDecided;
+  }
+
+  updateStatus();
+})();
+</script>
+{% endblock %}

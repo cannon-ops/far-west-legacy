@@ -29,6 +29,69 @@ COUPLE_RELATIONSHIPS_PATH = "/platform/tree/couple-relationships"
 CHILD_AND_PARENTS_RELATIONSHIPS_PATH = "/platform/tree/child-and-parents-relationships"
 SOURCE_DESCRIPTIONS_PATH = "/platform/sources/descriptions"
 
+# Person Matches by Example resource (plan §3.1, §8). Path and query params
+# (count, confidence 1-5) confirmed via developers.familysearch.org this session
+# (2026-08-08); the exact response envelope shape was NOT verifiable against live
+# docs without a working access token (M2.0 auth is currently broken — see
+# repo-memory.md Pending Decisions), so `_parse_match_candidates` below is
+# best-effort and defensive, not confirmed live. Re-verify at M2.3 build time.
+MATCHES_PATH = "/platform/tree/matches"
+
+# Placeholder bucket cutoffs against FS's 1-5 confidence scale (plan §9 open
+# question 5 — "tuned empirically against beta during M2.2"). Cannot be tuned
+# empirically until a live token exists; these are a reasonable starting split,
+# not a measured threshold. Revisit once real match responses are seen.
+MATCH_BUCKET_STRONG_MIN = 4
+MATCH_BUCKET_POSSIBLE_MIN = 2
+
+
+def bucket_for_confidence(confidence: float | int | None) -> str:
+    """Placeholder Strong/Possible/Weak bucketing (see MATCH_BUCKET_* above)."""
+    if confidence is None:
+        return "weak"
+    if confidence >= MATCH_BUCKET_STRONG_MIN:
+        return "strong"
+    if confidence >= MATCH_BUCKET_POSSIBLE_MIN:
+        return "possible"
+    return "weak"
+
+
+def _display_name(person: dict) -> str:
+    display = person.get("display") or {}
+    if display.get("name"):
+        return display["name"]
+    for name in person.get("names", []):
+        for form in name.get("nameForms", []):
+            if form.get("fullText"):
+                return form["fullText"]
+            parts = [p.get("value", "") for p in form.get("parts", [])]
+            if any(parts):
+                return " ".join(p for p in parts if p)
+    return "(name unavailable)"
+
+
+def _parse_match_candidates(payload: dict) -> list[dict]:
+    """Best-effort parse of a Person Matches by Example response into a flat
+    candidate list. FamilySearch's response envelope was not verifiable live this
+    session (see MATCHES_PATH note) — tries the shapes documented for FS person
+    search/match resources and degrades to an empty list rather than raising if
+    neither is present, so an unexpected shape shows "no matches" instead of
+    crashing the match-check screen."""
+    entries = payload.get("persons") or payload.get("entries") or []
+    candidates = []
+    for entry in entries:
+        person = entry.get("person", entry)
+        confidence = entry.get("score") if entry.get("score") is not None else entry.get("confidence")
+        display = person.get("display") or {}
+        candidates.append({
+            "pid": person.get("id"),
+            "name": _display_name(person),
+            "lifespan": display.get("lifespan", ""),
+            "confidence": confidence,
+            "bucket": bucket_for_confidence(confidence),
+        })
+    return candidates
+
 
 class FSClientError(Exception):
     """Non-retryable FamilySearch API failure."""
@@ -104,6 +167,33 @@ class FamilySearchClient:
             return pid
 
         return self._send_live(step, method, url, body, digest)
+
+    def search_matches(self, person_gedcomx: dict, count: int = 5) -> list[dict]:
+        """Person Matches by Example (plan §3.1) — a read, so it always executes for
+        real regardless of dry_run, and (unlike send()) is not journaled: match
+        results aren't a write and don't need idempotent resume."""
+        body = {"persons": [person_gedcomx]}
+        try:
+            resp = self._http.post(
+                f"{MATCHES_PATH}?count={count}",
+                json=body,
+                headers={
+                    "Authorization": f"Bearer {self.access_token}",
+                    "Content-Type": GEDCOMX_MEDIA_TYPE,
+                    "Accept": "application/json",
+                },
+            )
+        except httpx.TransportError as exc:
+            logger.error("fs_client: network error on match search", exc_info=True)
+            raise FSClientError(f"Network error on match search: {exc}") from exc
+
+        if resp.status_code == 401:
+            raise FSAuthExpiredError("FamilySearch session expired — re-auth required")
+        if resp.status_code >= 400:
+            logger.error("fs_client: match search failed: %s %s", resp.status_code, resp.text)
+            raise FSClientError(f"Match search failed: HTTP {resp.status_code}")
+
+        return _parse_match_candidates(resp.json())
 
     def _send_live(self, step: str, method: str, url: str, body: dict | None, digest: str) -> str | None:
         for attempt in range(MAX_RETRIES + 1):

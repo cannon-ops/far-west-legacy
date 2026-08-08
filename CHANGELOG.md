@@ -5,6 +5,37 @@ Format: session number, date, milestone label, summary of changes.
 
 ---
 
+## Session 010-H2 (2026-08-08) — Auth-Failure Diagnostics + M2.2 Match-Check/Confirm-Gate UI
+
+**Version: 0.7.0**
+
+- Live FamilySearch sign-in fails with "Invalid Oauth2 Request — unable to authenticate
+  client" from FamilySearch's own identity server. Root cause not yet identified — see
+  `repo-memory.md` Pending Decisions for the isolation test needed from Joel.
+- `FAMILYSEARCH_USE_PKCE` diagnostic toggle (`src/fs_auth.py`, `.env`/`.env.example`,
+  default on) — lets the plain authorization-code flow be isolation-tested without a
+  code change. 16 new tests in `tests/test_fs_auth.py` (first test coverage for this
+  module) cover both PKCE on/off paths.
+- `src/fs_client.py` gained `search_matches()` (Person Matches by Example — always
+  executes live even under dry-run since it's a read, not journaled since it's not a
+  write) and `bucket_for_confidence()` (placeholder Strong/Possible/Weak bucketing
+  against FS's 1-5 confidence scale — cannot be tuned empirically without a live token,
+  plan §9 open question 5).
+- M2.2 match-check + confirm-gate UI: `GET /upload/<job_id>` (match panel per person —
+  name/lifespan/candidate PID/confidence bucket/link-out to FamilySearch.org) and
+  `POST /upload/<job_id>/decide` (server-validated per-person decisions; commit blocked
+  until every person is decided, per the hard human-confirm-gate rule) in `src/app.py`;
+  `templates/upload.html` + `templates/decided.html`. Gated behind sign-in and
+  `FWL_FS_UPLOAD_ENABLED` (default off, per plan §0 prod-safety). `approve()` now keeps
+  `tmp/<job_id>.json` alive (overwritten with the approved data) instead of deleting it,
+  so `/upload/<job_id>` has something to load.
+- M2.3 (live writes) is not built — the decide route only records decisions.
+- Tests: 117 passed, 3 skipped (up from 81+3)
+- **Live browser-verified M2.2 acceptance (plan's "seeded near-duplicate surfaced" check)
+  is blocked on the still-open auth failure** — carried into the next session.
+
+---
+
 ## Session 010 (2026-08-08) — M2.0 FamilySearch OAuth + M2.1 Mapping/Client/Dry-Run
 
 **Version: 0.6.0**

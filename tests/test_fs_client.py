@@ -9,7 +9,7 @@ import json
 import httpx
 import pytest
 
-from src.fs_client import FSAuthExpiredError, FSClientError, FamilySearchClient
+from src.fs_client import FSAuthExpiredError, FSClientError, FamilySearchClient, bucket_for_confidence
 
 
 @pytest.fixture(autouse=True)
@@ -152,3 +152,109 @@ class TestValidationErrorHalts:
         with pytest.raises(FSClientError):
             client.send("person:subject", "POST", "https://apibeta.familysearch.org/platform/tree/persons", {"names": []})
         assert len(calls) == 1
+
+
+class TestBucketForConfidence:
+    def test_strong(self):
+        assert bucket_for_confidence(5) == "strong"
+        assert bucket_for_confidence(4) == "strong"
+
+    def test_possible(self):
+        assert bucket_for_confidence(3) == "possible"
+        assert bucket_for_confidence(2) == "possible"
+
+    def test_weak(self):
+        assert bucket_for_confidence(1) == "weak"
+        assert bucket_for_confidence(0) == "weak"
+
+    def test_missing_confidence_is_weak(self):
+        assert bucket_for_confidence(None) == "weak"
+
+
+class TestSearchMatches:
+    def test_dry_run_still_executes_live(self, tmp_path):
+        """Match search is a read — must never be short-circuited by dry_run,
+        unlike send()'s POST/PUT/DELETE block."""
+        calls = []
+
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(200, json={"persons": []})
+
+        client = FamilySearchClient(access_token="tok", dry_run=True, journal_path=tmp_path / "journal.json",
+                                     transport=httpx.MockTransport(handler))
+        client.search_matches({"names": []})
+
+        assert len(calls) == 1
+
+    def test_parses_candidates_with_confidence_and_bucket(self, tmp_path):
+        def handler(request):
+            return httpx.Response(200, json={
+                "persons": [
+                    {
+                        "id": "PID-1",
+                        "score": 5,
+                        "display": {"name": "Donna Sue Neese", "lifespan": "1939-2024"},
+                    },
+                    {
+                        "id": "PID-2",
+                        "confidence": 2,
+                        "display": {"name": "D. Neese", "lifespan": "1940-2023"},
+                    },
+                ]
+            })
+
+        client = FamilySearchClient(access_token="tok", dry_run=False, journal_path=tmp_path / "journal.json",
+                                     transport=httpx.MockTransport(handler))
+        candidates = client.search_matches({"names": []})
+
+        assert candidates[0] == {
+            "pid": "PID-1", "name": "Donna Sue Neese", "lifespan": "1939-2024",
+            "confidence": 5, "bucket": "strong",
+        }
+        assert candidates[1]["bucket"] == "possible"
+
+    def test_no_matches_returns_empty_list(self, tmp_path):
+        def handler(request):
+            return httpx.Response(200, json={"persons": []})
+
+        client = FamilySearchClient(access_token="tok", dry_run=False, journal_path=tmp_path / "journal.json",
+                                     transport=httpx.MockTransport(handler))
+        assert client.search_matches({"names": []}) == []
+
+    def test_unexpected_shape_degrades_to_empty_list(self, tmp_path):
+        def handler(request):
+            return httpx.Response(200, json={"something_else": True})
+
+        client = FamilySearchClient(access_token="tok", dry_run=False, journal_path=tmp_path / "journal.json",
+                                     transport=httpx.MockTransport(handler))
+        assert client.search_matches({"names": []}) == []
+
+    def test_401_raises_fs_auth_expired(self, tmp_path):
+        def handler(request):
+            return httpx.Response(401)
+
+        client = FamilySearchClient(access_token="tok", dry_run=False, journal_path=tmp_path / "journal.json",
+                                     transport=httpx.MockTransport(handler))
+        with pytest.raises(FSAuthExpiredError):
+            client.search_matches({"names": []})
+
+    def test_4xx_raises_fs_client_error(self, tmp_path):
+        def handler(request):
+            return httpx.Response(400, text="bad request")
+
+        client = FamilySearchClient(access_token="tok", dry_run=False, journal_path=tmp_path / "journal.json",
+                                     transport=httpx.MockTransport(handler))
+        with pytest.raises(FSClientError):
+            client.search_matches({"names": []})
+
+    def test_not_journaled(self, tmp_path):
+        """Match search isn't a write — it must not appear in the resumable journal."""
+        def handler(request):
+            return httpx.Response(200, json={"persons": []})
+
+        client = FamilySearchClient(access_token="tok", dry_run=False, journal_path=tmp_path / "journal.json",
+                                     transport=httpx.MockTransport(handler))
+        client.search_matches({"names": []})
+
+        assert client.journal == []

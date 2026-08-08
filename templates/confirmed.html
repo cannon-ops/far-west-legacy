@@ -72,6 +72,9 @@
 </div>
 
 <div class="form-actions" style="border-top: none; padding-top: 0;">
-  <a href="/tool" class="btn btn-primary">Extract Another Obituary</a>
+  {% if fs_upload_enabled %}
+  <a href="/upload/{{ job_id }}" class="btn btn-primary">Continue to FamilySearch Match Check &rarr;</a>
+  {% endif %}
+  <a href="/tool" class="btn btn-secondary">Extract Another Obituary</a>
 </div>
 {% endblock %}
