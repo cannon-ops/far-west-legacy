@@ -267,8 +267,11 @@
     <span>Obituary &rarr; FamilySearch Family Tree</span>
     {% if fs_display_name %}
       <span style="margin-left: auto;">Signed in to FamilySearch as {{ fs_display_name }}</span>
+      <form method="post" action="/auth/logout" style="margin: 0;">
+        <button type="submit" class="footer-link">Not you? Sign&nbsp;out</button>
+      </form>
     {% else %}
-      <a href="/auth/login" style="margin-left: auto;">Sign in to FamilySearch</a>
+      <a href="/auth/login" style="margin-left: auto;">Sign in to&nbsp;FamilySearch</a>
     {% endif %}
   </header>
   <main>

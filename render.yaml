@@ -18,5 +18,10 @@ services:
         value: 3.12.4
       - key: FLASK_ENV
         value: production
+      # Signs the session cookie that carries fs_sid. Render generates it once and keeps
+      # it stable across deploys, so both gunicorn workers agree and sessions survive a
+      # redeploy. src/app.py refuses to start in production without it.
+      - key: FLASK_SECRET_KEY
+        generateValue: true
       - key: ANTHROPIC_API_KEY
         sync: false   # set in Render dashboard or via API; never commit a value
