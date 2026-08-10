@@ -6,32 +6,32 @@ to be the same CFS/TributeArchive platform as Stith Family Funeral Home, byte-fo
 on markup, JS, and robots.txt shape (only the domain and the sitemap subdirectory prefix
 differ — `/wtd/` here vs. Stith's `/sth/`).
 
-**NOT currently usable from this app — do not wire this into app.py or cli.py.**
-Every real endpoint (`robots.txt`, `/listings`, the sitemap, `/obituary/<slug>` detail
-pages) returns Cloudflare's "Attention Required!" 403 challenge page to both `requests`
-and `httpx` — the two HTTP clients already used elsewhere in this codebase — even with
-full browser-like headers. `curl` with the identical User-Agent succeeds on every one of
-those same URLs, every time, from the same machine and network. Headers and UA are ruled
-out as the cause (both attempts used the same values in both clients); what's left is a
-Cloudflare bot-management rule keyed off something curl's TLS/HTTP client fingerprint
-doesn't trip and Python's networking stack does (`requests` and `httpx` share the same
-underlying `ssl`/`urllib3`-style stack; curl's is a different implementation). Confirmed
-reproducible across multiple attempts over several minutes, not a transient rate limit.
-
-Fixing this would mean a Python HTTP client with a browser-like TLS fingerprint (e.g.
-`curl_cffi`) or shelling out to the system `curl` — both are real architecture changes
-(a new dependency, or a subprocess boundary) that this session's scope didn't call for
-and didn't add unilaterally. Left for a deliberate decision, not guessed at here. See
+**Transport is `curl_cffi`, not `requests`, and only for this tenant.** Every real
+Resthaven endpoint 403s both `requests` and `httpx` behind Cloudflare's "Attention
+Required!" challenge — confirmed 2026-08-10 to be a TLS/HTTP-client-fingerprint block,
+not headers/UA (both were tried with full browser-like values and still 403'd), not
+rate-limiting (reproducible across multiple attempts over several minutes). `curl` with
+the identical User-Agent passes every time, which is what pointed at the fingerprint
+itself as the trigger. `curl_cffi.requests.Session(impersonate="chrome")` presents a real
+Chrome TLS fingerprint and gets a clean 200 on every endpoint this adapter uses —
+confirmed live 2026-08-10, not assumed from the library's README. Full original finding:
 `cannonops-vault/Handoff-Status/2026-08-10-FWL-011-H3-Stith-UI-Resthaven-Render.md`.
 
-The generic CFS adapter itself (this file's parent class, `cfs_source.py`) is unaffected
-and is why this class exists at all: if the transport problem is ever solved, the
-markup-parsing side needs zero changes.
+`_get()` is overridden here rather than in the shared `cfs_source.py` base class,
+specifically so `StithSource` and any other future CFS tenant keep using plain
+`requests` unchanged — curl_cffi's exception hierarchy does not subclass `requests`'s
+(`curl_cffi.requests.exceptions.RequestException` inherits from `curl_cffi.curl.CurlError`
+/ `OSError`, not `requests.RequestException`), so the parent class's except clause would
+not have caught it. Everything else (sitemap parsing, detail parsing, search, pagination,
+throttling) is inherited unchanged from `CFSObituarySource`.
 """
 
-import requests
+import time
 
-from src.sources.cfs_source import CFSObituarySource, CFSSourceError
+from curl_cffi import requests as cffi_requests
+from curl_cffi.requests.exceptions import RequestException as CFFIRequestException
+
+from src.sources.cfs_source import USER_AGENT, CFSObituarySource, CFSSourceError
 
 BASE_URL = "https://www.resthavenmort.com"
 SITEMAP_PATH = "/wtd/obituary_sitemap.xml"
@@ -42,5 +42,16 @@ ResthavenSourceError = CFSSourceError
 
 
 class ResthavenSource(CFSObituarySource):
-    def __init__(self, session: requests.Session | None = None):
+    def __init__(self, session: cffi_requests.Session | None = None):
+        session = session or cffi_requests.Session(impersonate="chrome")
         super().__init__(base_url=BASE_URL, sitemap_path=SITEMAP_PATH, session=session)
+
+    def _get(self, url: str) -> cffi_requests.Response:
+        self._throttle()
+        try:
+            resp = self._session.get(url, timeout=15, headers={"User-Agent": USER_AGENT})
+            resp.raise_for_status()
+        except CFFIRequestException as exc:
+            raise CFSSourceError(f"Request failed for {url}: {exc}") from exc
+        self._last_request_at = time.monotonic()
+        return resp

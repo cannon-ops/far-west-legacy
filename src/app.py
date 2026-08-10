@@ -3,10 +3,12 @@ app.py — Flask review UI for the Far West Legacy obituary extraction pipeline.
 
 Routes:
   GET  /                        — marketing homepage (farwestlegacy.com landing)
-  GET  /tool                    — paste/URL/Stith-search input form
+  GET  /tool                    — paste/URL/Stith-search/Resthaven-search input form
   POST /extract                 — run extraction, redirect to review
   POST /search/stith            — Stith Family Funeral Home name search, list matches
   POST /search/stith/extract    — fetch a picked match, extract, redirect to review
+  POST /search/resthaven        — Resthaven Mortuary name search, list matches
+  POST /search/resthaven/extract — fetch a picked match, extract, redirect to review
   GET  /review/<job_id>         — editable review form
   POST /approve/<job_id>        — save approved JSON to output/
   GET  /auth/login, /callback   — FamilySearch OAuth2 sign-in (M2.0)
@@ -35,6 +37,8 @@ from src.extract import ExtractionError, extract_from_text
 from src.fetch import FetchError, fetch_obituary_text
 from src.fs_client import FamilySearchClient, FSAuthExpiredError, FSClientError
 from src.obituary_source import SearchUnavailable
+from src.sources.resthaven_source import BASE_URL as RESTHAVEN_BASE_URL
+from src.sources.resthaven_source import ResthavenSource, ResthavenSourceError
 from src.sources.stith_source import BASE_URL as STITH_BASE_URL
 from src.sources.stith_source import StithSource, StithSourceError
 from src.version import APP_VERSION, CHANGELOG_TEXT
@@ -140,7 +144,7 @@ def _output_filename(deceased: dict) -> str:
 
 
 def _extract_and_save(obituary_text: str, source_url: str, activity_source: str) -> str:
-    """Shared tail of every input channel (paste, URL fetch, Stith search): run
+    """Shared tail of every input channel (paste, URL fetch, Stith/Resthaven search): run
     extraction, write tmp/<job_id>.json, log activity. Returns the new job_id.
     Raises ExtractionError — callers render their own error context per channel."""
     result = extract_from_text(obituary_text, source_url=source_url)
@@ -239,6 +243,58 @@ def search_stith_extract():
 
     try:
         job_id = _extract_and_save(detail.text, detail.source_url, "stith")
+    except ExtractionError as exc:
+        error = f"Extraction failed: {exc}"
+        record_activity("extract_error", error_type="ExtractionError", message=str(exc))
+        return render_template(
+            "index.html",
+            error=error,
+            obituary_text=detail.text,
+            source_url=detail.source_url,
+        )
+
+    return redirect(url_for("review", job_id=job_id))
+
+
+@app.post("/search/resthaven")
+def search_resthaven():
+    query = request.form.get("resthaven_query", "").strip()
+    if not query:
+        return render_template(
+            "index.html", error="Enter a name to search Resthaven Mortuary.",
+        )
+
+    source = ResthavenSource()
+    try:
+        results = source.search(query)
+    except ResthavenSourceError as exc:
+        record_activity("resthaven_search_error", error=str(exc))
+        return render_template("index.html", error=f"Resthaven search failed: {exc}")
+
+    if isinstance(results, SearchUnavailable):
+        return render_template(
+            "index.html", error=f"Resthaven search unavailable: {results.reason}",
+        )
+
+    record_activity("resthaven_search", query=query, result_count=len(results))
+    return render_template("resthaven_results.html", query=query, results=results)
+
+
+@app.post("/search/resthaven/extract")
+def search_resthaven_extract():
+    detail_url = request.form.get("detail_url", "").strip()
+    if not detail_url.startswith(RESTHAVEN_BASE_URL):
+        return render_template("index.html", error="Invalid obituary link.")
+
+    source = ResthavenSource()
+    try:
+        detail = source.fetch_detail(detail_url)
+    except ResthavenSourceError as exc:
+        record_activity("resthaven_fetch_error", error=str(exc))
+        return render_template("index.html", error=f"Could not fetch obituary: {exc}")
+
+    try:
+        job_id = _extract_and_save(detail.text, detail.source_url, "resthaven")
     except ExtractionError as exc:
         error = f"Extraction failed: {exc}"
         record_activity("extract_error", error_type="ExtractionError", message=str(exc))

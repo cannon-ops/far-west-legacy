@@ -12,6 +12,12 @@ httpx>=0.27
 beautifulsoup4>=4.12
 lxml>=5.0
 
+# Resthaven Mortuary only (src/sources/resthaven_source.py) — resthavenmort.com's
+# Cloudflare config 403s requests/httpx on TLS-fingerprint grounds; curl_cffi
+# impersonates a real browser's TLS handshake to get past it. Not used by any other
+# source, including Stith, which requests already handles fine.
+curl_cffi==0.16.0
+
 # Testing
 pytest>=8.0
 

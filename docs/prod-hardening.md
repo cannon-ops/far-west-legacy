@@ -1,6 +1,7 @@
 # Production Hardening — Multi-Worker Token Store and Booth Failure Modes
 
-**Status:** DESIGNED + BUILT (FWL-010-H3, 2026-08-08).
+**Status:** DESIGNED + BUILT (FWL-010-H3, 2026-08-08). §2.1's Render assumptions verified
+and §3's F-09 updated (FWL-011-H3, 2026-08-10) — see those sections for what changed.
 **Scope:** the layer between "M2 works on a dev laptop" and "a stranger can use this at the
 Chautauqua booth without corrupting their family tree."
 **Relationship to the plan:** `planning/familysearch-upload-plan.md` §0 defers this with "that's
@@ -77,15 +78,31 @@ job locks.
 State these plainly, because if any is wrong the answer changes to Redis:
 
 1. **Render's free plan runs exactly one instance of the service.** SQLite-in-container is
-   correct for N workers in 1 container and incorrect for N containers.
+   correct for N workers in 1 container and incorrect for N containers. **Verified true**
+   (FWL-011-H3, 2026-08-10, against Render's own docs): free web services explicitly don't
+   support scaling beyond a single instance.
 2. **Free-plan deploys stop the old instance before starting the new one** (no zero-downtime
    overlap). If two containers ever run simultaneously during a deploy, sessions created on
    one are invisible to the other. Consequence is mild (re-login), not corrupting.
+   **Verified FALSE** (FWL-011-H3, 2026-08-10): Render does zero-downtime rolling deploys on
+   every plan tier. The new instance boots and passes its health check while the old
+   instance keeps serving all traffic; then traffic switches (a cutover) to the new
+   instance; the old instance gets `SIGTERM` 60 seconds later. The old and new instances are
+   separate containers with separate ephemeral filesystems, so they do not share a SQLite
+   file the way two gunicorn workers *inside one instance* do — this reopens, at the
+   instance-cutover boundary instead of the gunicorn-worker boundary, the identical class of
+   bug §1.1/§1.2 fixed: a user whose `/auth/login` lands on the old instance and whose
+   `/callback` lands on the new instance after cutover gets "Unknown or expired OAuth
+   state" again. Narrow window (requires a deploy to land while a real user is mid-flow, and
+   the instance hadn't already spun down from idling), not corrupting (lost state, not
+   duplicated writes) — but real. **Resolved via operational policy, not code, for now
+   (Chief, 2026-08-10): no deploys during live booth/demo hours.** A deploy freeze during
+   the exact window this matters removes the precondition for the race entirely, at zero
+   engineering cost, and is the right-sized answer for a booth-scale app — the code fix
+   (Redis, confined to `src/token_store.py`, same upgrade path as assumption 1's failure
+   mode) stays on the table if FWL ever needs live deploys during active use.
 3. **`-w 2` means two forked processes sharing a filesystem**, which is standard gunicorn
    behavior and not Render-specific.
-
-Assumptions 1 and 2 are Render plan behavior and were not verified against Render's docs
-this session. See "Needs Chief" in the completion report.
 
 ### 2.2 Implementation notes worth keeping
 
@@ -137,7 +154,7 @@ cannot restart a service. Every row below has to end in a state a volunteer can 
 | **F-06** | Journal left with an `in_flight` write (POST sent, response lost) | **Halts.** `FSUncertainWriteError`. Never retried automatically. | "We sent one step to FamilySearch but never heard back, so we cannot tell whether it was saved. Check the person on FamilySearch before continuing." with a link out. | Escalate, or have the visitor check FamilySearch.org. **Deliberately a dead end**, because guessing here is how you get a duplicate ancestor. |
 | **F-07** | Visitor walks away still signed in; next person sits down | Idle window expires the session. Until it does, the header shows the previous visitor's name next to a "Not you? Sign out" button. | The previous visitor's name, clearly labeled. | Click Sign out. For a hard reset of every session at once, `token_store.reset()`. |
 | **F-08** | Render free instance spins down (idle ~15 min) | Container is destroyed. Every token and every journal in `tmp/` is gone. | Cold-start delay (tens of seconds), then a signed-out app. | Wait for the page, sign in again. **Any in-progress upload is unrecoverable and its journal is gone.** See risk note below. |
-| **F-09** | Redeploy lands mid-upload | Same as F-08, plus `FLASK_SECRET_KEY` stays stable (Render `generateValue`) so cookies survive. Tokens do not. | Signed out mid-flow. | Sign in again, restart the upload. |
+| **F-09** | Redeploy lands exactly on a live OAuth handshake or in-progress upload (verified mechanism FWL-011-H3, 2026-08-10 — see §2.1 item 2) | Render runs zero-downtime rolling deploys: old and new instances briefly run concurrently as separate containers with separate token-store files. A request that straddles the cutover moment (e.g. `/auth/login` on the old instance, `/callback` on the new one) finds no matching record. `FLASK_SECRET_KEY` stays stable (Render `generateValue`) so the cookie itself survives; the server-side token-store record does not. **Mitigated operationally, not in code: no deploys during live booth/demo hours (Chief, 2026-08-10)** — removes the precondition, so this row shouldn't fire in practice. | If it does fire anyway: signed out mid-flow, or "Unknown or expired OAuth state." | Sign in again, restart the upload/step. Confirm no deploy landed during the booth window; if one did, that's the policy violation to flag, not a code bug. |
 | **F-10** | One gunicorn worker crashes and is replaced | Store and journal are on disk and survive. Any job lock the dead worker held expires in 5 min. | Nothing, or a single failed request. | Nothing. |
 | **F-11** | FamilySearch throttles the user (429) | Existing `fs_client` behavior: honor `Retry-After`, back off, cap 3 retries, journal intact. | "FamilySearch is throttling us. Try again in a minute." | Wait, then resume. |
 | **F-12** | Forged session cookie | Production refuses to boot without `FLASK_SECRET_KEY`; `generateValue` supplies a strong one. Cookie is HttpOnly, SameSite=Lax, Secure in production. | N/A | N/A |

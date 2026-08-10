@@ -76,6 +76,18 @@
   </form>
 </div>
 
+<div class="card">
+  <form method="post" action="/search/resthaven">
+    <div class="field">
+      <label for="resthaven_query">Search Resthaven Mortuary <span style="font-weight:normal;text-transform:none;">(by name)</span></label>
+      <div style="display:flex; gap:0.5rem;">
+        <input type="text" id="resthaven_query" name="resthaven_query" placeholder="e.g. Barb" style="flex:1;">
+        <button type="submit" class="btn btn-secondary">Search &rarr;</button>
+      </div>
+    </div>
+  </form>
+</div>
+
 <style>
   .field-header {
     display: flex;

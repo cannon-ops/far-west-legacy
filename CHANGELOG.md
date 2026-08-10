@@ -62,6 +62,39 @@ No code changed — verification and documentation only, per this phase's own in
 
 ---
 
+## Session 011-H4 (2026-08-10) — curl_cffi for Resthaven, Wire Into the App, Deploy-Freeze Policy
+
+- **curl_cffi, scoped to Resthaven only.** `src/sources/resthaven_source.py`'s `_get()` is
+  now overridden to use `curl_cffi.requests.Session(impersonate="chrome")`, which presents
+  a real Chrome TLS fingerprint and gets a clean 200 on every Resthaven endpoint Cloudflare
+  had been 403ing (`robots.txt`, `/listings`, the sitemap, `/obituary/<slug>` — confirmed
+  live). The override lives entirely in `resthaven_source.py`; `cfs_source.py` and
+  `stith_source.py` are untouched, so Stith keeps its plain `requests` transport exactly as
+  before. `curl_cffi`'s exception hierarchy doesn't subclass `requests`'s (it inherits from
+  `curl_cffi.curl.CurlError`/`OSError` instead), which is why the shared base class's
+  `_get()` couldn't have caught it — the override wraps `CFFIRequestException` into
+  `CFSSourceError` itself, same contract as the base class. `curl_cffi==0.16.0` pinned in
+  `requirements.txt`, used nowhere else.
+- **Wired into the app, mirroring Stith exactly.** `app.py` gained `POST /search/resthaven`
+  and `POST /search/resthaven/extract` (identical shape to the Stith routes, same
+  `_extract_and_save()` reuse, same base-URL validation against a client-controlled
+  `detail_url`), and `/tool` gained a "Search Resthaven Mortuary" panel. `cli.py` gained
+  `--resthaven-search NAME`, mirroring `--stith-search`.
+- **Tests:** `tests/test_resthaven_source.py`'s live-network class is no longer `xfail` — it
+  passes for real now — and gained two offline tests confirming the curl_cffi-specific
+  error wrapping. New `tests/test_app_resthaven_search.py` (10 route tests, mirrors
+  `test_app_stith_search.py`). Full suite: 206 passed, 9 skipped (up from 193+9).
+- Live-tested end to end in a real browser session against a running dev server: searched
+  "Barb," picked Victor Barb, real curl_cffi fetch through Cloudflare, real Claude API
+  extraction, review page showed correctly extracted fields.
+- **Deploy-freeze policy documented.** Chief's decision: no deploys during live booth/demo
+  hours, resolving the deploy-cutover race `token_store.py` doesn't cover (found FWL-011-H3
+  Phase 3). Recorded in `docs/prod-hardening.md` §2.1 (assumption 2's writeup) and its F-09
+  failure-mode row, and closed out in `repo-memory.md` Pending Decisions as "resolved via
+  operational policy, not code, for now."
+
+---
+
 ## Session 011-H3 Phase 1 (2026-08-10) — Wire Stith Name Search into the Flask UI
 
 - `templates/index.html` gained a third input channel on `/tool`: a "Search Stith

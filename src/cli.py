@@ -6,6 +6,7 @@ Usage:
     python -m src.cli --file path/to/obituary.txt
     python -m src.cli --url https://example.com/obituary
     python -m src.cli --stith-search "Hughes"
+    python -m src.cli --resthaven-search "Barb"
 """
 
 import argparse
@@ -16,6 +17,7 @@ from pathlib import Path
 from src.extract import ExtractionError, extract_from_text
 from src.fetch import FetchError, fetch_obituary_text
 from src.obituary_source import SearchUnavailable
+from src.sources.resthaven_source import ResthavenSource, ResthavenSourceError
 from src.sources.stith_source import StithSource, StithSourceError
 
 OUTPUT_DIR = Path(__file__).parent.parent / "output"
@@ -56,6 +58,35 @@ def _stith_search_and_pick(query: str) -> tuple[str | None, str]:
     return detail.text, detail.source_url
 
 
+def _resthaven_search_and_pick(query: str) -> tuple[str | None, str]:
+    """Search Resthaven Mortuary by name, print numbered matches, prompt for a pick,
+    fetch full text. Returns (None, "") if there's nothing to extract (no matches, or
+    user cancelled)."""
+    source = ResthavenSource()
+    results = source.search(query)
+    if isinstance(results, SearchUnavailable):
+        print(f"Search unavailable: {results.reason}", file=sys.stderr)
+        return None, ""
+    if not results:
+        print(f"No matches found for {query!r}.", file=sys.stderr)
+        return None, ""
+
+    for i, stub in enumerate(results, start=1):
+        print(f"  [{i}] {stub.name} ({stub.date or 'date unknown'})", file=sys.stderr)
+
+    choice = input(f"Pick 1-{len(results)} (or blank to cancel): ").strip()
+    if not choice:
+        return None, ""
+    try:
+        picked = results[int(choice) - 1]
+    except (ValueError, IndexError):
+        print(f"Invalid choice: {choice!r}", file=sys.stderr)
+        return None, ""
+
+    detail = source.fetch_detail(picked.detail_url)
+    return detail.text, detail.source_url
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         description="Extract genealogical data from an obituary."
@@ -67,6 +98,10 @@ def main(argv=None) -> int:
     group.add_argument(
         "--stith-search", metavar="NAME",
         help="Search Stith Family Funeral Home listings by name, pick a match, extract it",
+    )
+    group.add_argument(
+        "--resthaven-search", metavar="NAME",
+        help="Search Resthaven Mortuary listings by name, pick a match, extract it",
     )
 
     args = parser.parse_args(argv)
@@ -88,11 +123,19 @@ def main(argv=None) -> int:
         except FetchError as exc:
             print(f"Fetch error: {exc}", file=sys.stderr)
             return 1
-    else:  # --stith-search
+    elif args.stith_search:
         try:
             obituary_text, source_url = _stith_search_and_pick(args.stith_search)
         except StithSourceError as exc:
             print(f"Stith fetch error: {exc}", file=sys.stderr)
+            return 1
+        if obituary_text is None:
+            return 1
+    else:  # --resthaven-search
+        try:
+            obituary_text, source_url = _resthaven_search_and_pick(args.resthaven_search)
+        except ResthavenSourceError as exc:
+            print(f"Resthaven fetch error: {exc}", file=sys.stderr)
             return 1
         if obituary_text is None:
             return 1
