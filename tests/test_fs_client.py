@@ -9,7 +9,16 @@ import json
 import httpx
 import pytest
 
-from src.fs_client import FSAuthExpiredError, FSClientError, FamilySearchClient, bucket_for_confidence
+from src import token_store
+from src.fs_client import (
+    FSAuthExpiredError,
+    FSClientError,
+    FSJobLockedError,
+    FSUncertainWriteError,
+    FamilySearchClient,
+    bucket_for_confidence,
+    run_upload_sequence,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -137,6 +146,128 @@ class TestAuthExpired:
         with pytest.raises(FSAuthExpiredError):
             client.send("person:subject", "POST", "https://apibeta.familysearch.org/platform/tree/persons", {"names": []})
         assert client.journal[-1]["status"] == "error"
+
+
+class TestInterruptedWrite:
+    """A write whose response never came back is the one case we must never retry blind:
+    the person may already be in the tree (plan §4.3, network-error row)."""
+
+    def _dropped_write(self, journal_path):
+        def handler(request):
+            raise httpx.ConnectError("connection dropped")
+
+        client = FamilySearchClient(access_token="tok", dry_run=False, journal_path=journal_path,
+                                     transport=httpx.MockTransport(handler))
+        with pytest.raises(FSClientError):
+            client.send("person:subject", "POST", "https://apibeta.familysearch.org/platform/tree/persons", {"names": []})
+        return client
+
+    def test_intent_recorded_before_the_call(self, tmp_path):
+        journal_path = tmp_path / "journal.json"
+        client = self._dropped_write(journal_path)
+
+        on_disk = json.loads(journal_path.read_text(encoding="utf-8"))
+        assert [e["status"] for e in on_disk] == ["in_flight"]
+
+    def test_resume_refuses_to_resend_an_in_flight_write(self, tmp_path):
+        journal_path = tmp_path / "journal.json"
+        self._dropped_write(journal_path)
+
+        calls = []
+
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(201, headers={"Location": ".../persons/REAL-PID"})
+
+        resumed = FamilySearchClient(access_token="tok", dry_run=False, journal_path=journal_path,
+                                      transport=httpx.MockTransport(handler))
+        with pytest.raises(FSUncertainWriteError):
+            resumed.send("person:subject", "POST", "https://apibeta.familysearch.org/platform/tree/persons", {"names": []})
+        assert calls == []  # never silently re-created the person
+
+    def test_in_flight_get_is_safely_retried(self, tmp_path):
+        """Reads have no side effects, so an interrupted search just runs again."""
+        journal_path = tmp_path / "journal.json"
+
+        def dropping(request):
+            raise httpx.ConnectError("connection dropped")
+
+        client = FamilySearchClient(access_token="tok", dry_run=False, journal_path=journal_path,
+                                     transport=httpx.MockTransport(dropping))
+        with pytest.raises(FSClientError):
+            client.send("search:subject", "GET", "https://apibeta.familysearch.org/platform/tree/search")
+
+        calls = []
+
+        def ok(request):
+            calls.append(request)
+            return httpx.Response(200, json={})
+
+        resumed = FamilySearchClient(access_token="tok", dry_run=False, journal_path=journal_path,
+                                      transport=httpx.MockTransport(ok))
+        resumed.send("search:subject", "GET", "https://apibeta.familysearch.org/platform/tree/search")
+        assert len(calls) == 1
+
+    def test_settled_write_leaves_one_entry_not_two(self, tmp_path):
+        journal_path = tmp_path / "journal.json"
+
+        def handler(request):
+            return httpx.Response(201, headers={"Location": ".../persons/REAL-PID"})
+
+        client = FamilySearchClient(access_token="tok", dry_run=False, journal_path=journal_path,
+                                     transport=httpx.MockTransport(handler))
+        client.send("person:subject", "POST", "https://apibeta.familysearch.org/platform/tree/persons", {"names": []})
+
+        on_disk = json.loads(journal_path.read_text(encoding="utf-8"))
+        assert len(on_disk) == 1
+        assert on_disk[0]["status"] == "ok"
+
+
+class TestJobLocking:
+    """Duplicate tab / double-submitted commit button. The journal alone does not stop
+    this: both runs load an empty journal and both POST."""
+
+    @pytest.fixture(autouse=True)
+    def _isolated_store(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("FWL_TOKEN_STORE_PATH", str(tmp_path / "store.sqlite3"))
+
+    def _client(self, tmp_path, calls):
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(201, headers={"Location": ".../persons/REAL-PID"})
+
+        return FamilySearchClient(access_token="tok", dry_run=True,
+                                   journal_path=tmp_path / "journal.json",
+                                   transport=httpx.MockTransport(handler))
+
+    _PLAN = {
+        "persons": {"subject": {"names": []}},
+        "relationships": {"couples": [], "child_and_parents": []},
+    }
+
+    def test_second_owner_is_refused_while_the_first_holds_the_lock(self, tmp_path):
+        token_store.acquire_job_lock("job1", "tab-a")
+        client = self._client(tmp_path, [])
+        with pytest.raises(FSJobLockedError):
+            run_upload_sequence(client, self._PLAN, job_id="job1", owner="tab-b")
+
+    def test_lock_is_released_when_the_sequence_finishes(self, tmp_path):
+        client = self._client(tmp_path, [])
+        run_upload_sequence(client, self._PLAN, job_id="job1", owner="tab-a")
+        assert token_store.job_lock_owner("job1") is None
+
+    def test_lock_is_released_when_the_sequence_raises(self, tmp_path):
+        client = self._client(tmp_path, [])
+        with pytest.raises(KeyError):
+            run_upload_sequence(client, {"persons": {}, "relationships": {
+                "couples": [{"person1": "missing", "person2": "missing"}], "child_and_parents": []}},
+                job_id="job1", owner="tab-a")
+        assert token_store.job_lock_owner("job1") is None
+
+    def test_omitting_the_lock_keeps_the_old_behavior(self, tmp_path):
+        client = self._client(tmp_path, [])
+        result = run_upload_sequence(client, self._PLAN)
+        assert result["persons"]["subject"] == "DRYRUN-P001"
 
 
 class TestValidationErrorHalts:

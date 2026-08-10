@@ -5,6 +5,56 @@ Format: session number, date, milestone label, summary of changes.
 
 ---
 
+## Session 010-H3 merge (2026-08-09) — Multi-Worker-Safe Token Store + Booth Hardening
+
+**Version: 0.7.0** (same milestone as H2, prod-hardening layer merged in alongside it)
+
+- Merged `fwl-010-fs-prod-hardening` (H-024/H3, built in parallel worktree against the
+  M2.0/M2.1 base, never previously merged — ledger row H-026) into this branch. Real
+  conflicts in `src/fs_auth.py` (H2's `FAMILYSEARCH_USE_PKCE` diagnostic toggle vs. H3's
+  swap from module-level dicts to `token_store`) and `tests/test_fs_client.py` (import
+  lists) resolved so both survive: `build_authorize_url()` keeps the PKCE on/off toggle,
+  but every pending-handshake and session write now goes through `token_store` instead of
+  a process-local dict. `tests/test_fs_auth.py` (not itself conflicted by git, but broken
+  by the dict removal) updated to the same per-test isolated-store fixture pattern already
+  used in `tests/test_token_store.py`.
+- **The headline fix:** Render runs `gunicorn -w 2`. The module-level dicts `fs_auth.py`
+  used to hold OAuth handshake state and sessions in are per-worker, so `/auth/login`
+  landing on one worker and `/callback` on the other lost the PKCE `code_verifier` and
+  failed with "Unknown or expired OAuth state." New `src/token_store.py` (SQLite, shared
+  filesystem, connections opened per call since gunicorn forks) backs pending handshakes,
+  sessions (sliding idle window + hard cap at token expiry), and upload-job locks instead.
+  This is a **different bug** than the "Invalid Oauth2 Request" error Joel hit testing
+  against `localhost:8081` in H2 — single-process, so the worker-split can't be the cause
+  there. That failure is still open; see `repo-memory.md` Pending Decisions.
+- `src/fs_client.py`: upload journal now records intent *before* each write, not after —
+  an interrupted write used to leave no record, so a resume would POST again and risk a
+  duplicate person. A resume that finds an unsettled write now halts (`FSUncertainWriteError`)
+  instead of guessing. `FSJobLockedError` + optional job lock in `run_upload_sequence()` stop
+  two browser tabs (or a double-submitted commit) from running the same upload twice.
+- `src/app.py`: `POST /auth/logout` (explicit sign-out, clears server-side token + cookie —
+  the shared-kiosk control). Production now refuses to start without `FLASK_SECRET_KEY` set
+  (was a silent dev-placeholder fallback). Session cookie gets `HttpOnly`/`SameSite=Lax`/
+  `Secure`-in-production. `/logs` 404s in production unless `FWL_LOGS_PUBLIC` is set (the
+  buffers can carry a prior visitor's FamilySearch display name). Header badge now uses
+  `peek_session()` (new, non-idle-sliding read) instead of `get_session()`, so a tab left
+  open on a walked-away kiosk visitor still times out on schedule.
+- `render.yaml`: `FLASK_SECRET_KEY` via `generateValue: true` (stable across deploys, both
+  workers agree).
+- `docs/prod-hardening.md` — design doc: options weighed (SQLite vs. Redis vs. per-session
+  files vs. encrypted cookie vs. sticky sessions), a 12-row booth failure-mode table, and
+  the security-review feed for plan §6 (8 items answered, 6 still open — see the doc).
+- Tests: 150 passed, 3 skipped (up from 117+3; H3 alone added 33 tests before merge —
+  `tests/test_token_store.py` plus new `TestInterruptedWrite`/`TestJobLocking` classes in
+  `tests/test_fs_client.py`).
+- **Still open, not resolved by this merge:** the F-08 booth cold-start risk (Render
+  free-tier idle spin-down) needs Chief's call on keep-alive-ping vs. plan upgrade; the
+  single-instance/stop-before-start Render assumptions the SQLite design rests on were
+  never verified against Render's own docs; the "Invalid Oauth2 Request" auth failure H2
+  hit is unrelated to this fix and remains unreproduced.
+
+---
+
 ## Session 010-H2 (2026-08-08) — Auth-Failure Diagnostics + M2.2 Match-Check/Confirm-Gate UI
 
 **Version: 0.7.0**

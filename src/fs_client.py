@@ -18,6 +18,8 @@ from pathlib import Path
 
 import httpx
 
+from src import token_store
+
 logger = logging.getLogger(__name__)
 
 API_HOST = "https://apibeta.familysearch.org"
@@ -101,6 +103,17 @@ class FSAuthExpiredError(FSClientError):
     """401 mid-sequence — caller should save the journal and bounce to /auth/login."""
 
 
+class FSUncertainWriteError(FSClientError):
+    """A previous run sent this write but never recorded an outcome, so we do not know
+    whether it landed in the tree. Resuming would risk creating the person twice, so the
+    sequence halts and a human checks FamilySearch. Never auto-retried."""
+
+
+class FSJobLockedError(FSClientError):
+    """Another request already holds this upload job. Raised for the duplicate-tab and
+    double-submit cases so only one sequence can be writing a given job at a time."""
+
+
 def _digest(body: dict | None) -> str:
     if not body:
         return ""
@@ -136,9 +149,15 @@ class FamilySearchClient:
                 return entry
         return None
 
+    def _entry(self, step: str) -> dict | None:
+        for entry in self.journal:
+            if entry["step"] == step:
+                return entry
+        return None
+
     def _append(self, step: str, method: str, url: str, digest: str, status: str,
-                resulting_pid: str | None, processing_time_ms: str | None = None) -> None:
-        self.journal.append({
+                resulting_pid: str | None, processing_time_ms: str | None = None) -> dict:
+        entry = {
             "step": step,
             "method": method,
             "url": url,
@@ -147,7 +166,19 @@ class FamilySearchClient:
             "resulting_pid": resulting_pid,
             "processing_time_ms": processing_time_ms,
             "ts": time.time(),
-        })
+        }
+        self.journal.append(entry)
+        self._write_journal()
+        return entry
+
+    def _settle(self, entry: dict, status: str, resulting_pid: str | None,
+                processing_time_ms: str | None) -> None:
+        """Close out an in-flight entry in place. Pairs with the pre-call _append so the
+        journal always shows intent before outcome (plan §4.2)."""
+        entry["status"] = status
+        entry["resulting_pid"] = resulting_pid
+        entry["processing_time_ms"] = processing_time_ms
+        entry["ts"] = time.time()
         self._write_journal()
 
     def send(self, step: str, method: str, url: str, body: dict | None = None) -> str | None:
@@ -157,6 +188,16 @@ class FamilySearchClient:
         if existing:
             logger.info("fs_client: step %s already completed (%s) — resuming from journal", step, existing["status"])
             return existing.get("resulting_pid")
+
+        # An in_flight entry means a previous run sent this and died before hearing back.
+        # Reads are free to retry; a write is not, because it may already be in the tree.
+        stale = self._entry(step)
+        if stale is not None and stale["status"] == "in_flight" and method != "GET":
+            logger.error("fs_client: step %s was in flight when the last run ended — refusing to resend", step)
+            raise FSUncertainWriteError(
+                f"Step {step} ({method} {url}) was sent but never confirmed. It may already "
+                f"exist in FamilySearch. Check the tree before resuming this upload."
+            )
 
         digest = _digest(body)
 
@@ -196,6 +237,10 @@ class FamilySearchClient:
         return _parse_match_candidates(resp.json())
 
     def _send_live(self, step: str, method: str, url: str, body: dict | None, digest: str) -> str | None:
+        # Intent before outcome: if the process dies between here and _settle, the journal
+        # shows in_flight and the next run halts instead of creating a duplicate person.
+        entry = self._entry(step) or self._append(step, method, url, digest, "in_flight", None)
+
         for attempt in range(MAX_RETRIES + 1):
             try:
                 resp = self._http.request(
@@ -219,7 +264,8 @@ class FamilySearchClient:
             processing_time = resp.headers.get("X-PROCESSING-TIME")
 
             if resp.status_code == 401:
-                self._append(step, method, url, digest, "error", None, processing_time)
+                # A rejected request did not land, so this is a clean error, not uncertain.
+                self._settle(entry, "error", None, processing_time)
                 raise FSAuthExpiredError("FamilySearch session expired — re-auth required")
 
             if resp.status_code in (429, 503) and attempt < MAX_RETRIES:
@@ -230,11 +276,11 @@ class FamilySearchClient:
 
             if resp.status_code >= 400:
                 logger.error("fs_client: %s %s failed: %s %s", method, url, resp.status_code, resp.text)
-                self._append(step, method, url, digest, "error", None, processing_time)
+                self._settle(entry, "error", None, processing_time)
                 raise FSClientError(f"{method} {url} failed: HTTP {resp.status_code}")
 
             pid = _extract_pid(resp)
-            self._append(step, method, url, digest, "ok", pid, processing_time)
+            self._settle(entry, "ok", pid, processing_time)
             return pid
 
         raise FSClientError(f"{method} {url} exhausted retries")
@@ -250,9 +296,32 @@ def _person_ref(pid: str) -> dict:
     return {"resource": f"{API_HOST}{PERSONS_PATH}/{pid}", "resourceId": pid}
 
 
-def run_upload_sequence(client: FamilySearchClient, plan: dict) -> dict:
+def run_upload_sequence(client: FamilySearchClient, plan: dict,
+                        job_id: str | None = None, owner: str | None = None) -> dict:
     """Execute (or dry-run) the write sequence from plan §4.2 against a fs_map plan.
-    Persons first, then relationships (need PIDs from persons), then source + attach."""
+    Persons first, then relationships (need PIDs from persons), then source + attach.
+
+    Pass job_id and owner to take the cross-worker advisory lock for the duration. The
+    journal alone does not stop two concurrent runs of the same job (both load an empty
+    journal, both POST); the lock does. Callers that omit it get the old, unlocked
+    behavior, which is only safe for tests and single-shot CLI use.
+    """
+    locked = False
+    if job_id and owner:
+        if not token_store.acquire_job_lock(job_id, owner):
+            raise FSJobLockedError(
+                f"Upload {job_id} is already running in another window. "
+                f"Finish or close that one before starting again."
+            )
+        locked = True
+    try:
+        return _run_upload_sequence(client, plan)
+    finally:
+        if locked:
+            token_store.release_job_lock(job_id, owner)
+
+
+def _run_upload_sequence(client: FamilySearchClient, plan: dict) -> dict:
     pids: dict[str, str] = {}
     for key, person_body in plan["persons"].items():
         pids[key] = client.send(f"person:{key}", "POST", f"{API_HOST}{PERSONS_PATH}", person_body)

@@ -24,6 +24,8 @@ from urllib.parse import urlencode
 
 import httpx
 
+from src import token_store
+
 logger = logging.getLogger(__name__)
 
 IDENT_HOST = "https://identbeta.familysearch.org"
@@ -42,10 +44,10 @@ DEFAULT_SCOPE = os.getenv("FAMILYSEARCH_SCOPE", "")
 # testing against the auth failure; any other value (including unset) keeps it on.
 DEFAULT_USE_PKCE = os.getenv("FAMILYSEARCH_USE_PKCE", "1").strip().lower() not in ("0", "false")
 
-# Server-side stores, never put tokens in the (signed but unencrypted) Flask session
-# cookie. Module-level dict is fine for single-process local dev only (see plan §4.1).
-_PENDING: dict[str, dict] = {}
-_SESSIONS: dict[str, dict] = {}
+# Server-side stores, never in the (signed but unencrypted) Flask session cookie.
+# Backed by token_store, which is shared across gunicorn workers — the module-level
+# dicts that used to live here broke under Render's `-w 2`, because /auth/login and
+# /callback are not guaranteed to land on the same worker. See docs/prod-hardening.md.
 
 
 class FSAuthError(Exception):
@@ -77,11 +79,11 @@ def build_authorize_url(client_id: str, redirect_uri: str, use_pkce: bool | None
 
     if use_pkce:
         verifier, challenge = _new_pkce_pair()
-        _PENDING[state] = {"code_verifier": verifier, "redirect_uri": redirect_uri}
+        token_store.put_pending(state, {"code_verifier": verifier, "redirect_uri": redirect_uri})
         params["code_challenge"] = challenge
         params["code_challenge_method"] = "S256"
     else:
-        _PENDING[state] = {"code_verifier": None, "redirect_uri": redirect_uri}
+        token_store.put_pending(state, {"code_verifier": None, "redirect_uri": redirect_uri})
 
     if DEFAULT_SCOPE:
         params["scope"] = DEFAULT_SCOPE
@@ -91,7 +93,7 @@ def build_authorize_url(client_id: str, redirect_uri: str, use_pkce: bool | None
 
 def exchange_code(client_id: str, code: str, state: str) -> dict:
     """Exchange an authorization code for an access token. Returns the raw token response."""
-    pending = _PENDING.pop(state, None)
+    pending = token_store.pop_pending(state)
     if pending is None:
         raise FSAuthError("Unknown or expired OAuth state — restart sign-in at /auth/login")
 
@@ -145,12 +147,19 @@ def display_name_from_user_response(data: dict) -> str:
 
 
 def store_session(session_id: str, token: dict, display_name: str) -> None:
-    _SESSIONS[session_id] = {"token": token, "display_name": display_name}
+    token_store.put_session(session_id, token, display_name)
 
 
 def get_session(session_id: str) -> dict | None:
-    return _SESSIONS.get(session_id)
+    """Active use of the session — slides the idle window forward."""
+    return token_store.get_session(session_id)
+
+
+def peek_session(session_id: str) -> dict | None:
+    """Passive read (header badge). Does not slide the idle window, so an idle tab left
+    open on the booth kiosk still times out on schedule."""
+    return token_store.peek_session(session_id)
 
 
 def clear_session(session_id: str) -> None:
-    _SESSIONS.pop(session_id, None)
+    token_store.clear_session(session_id)

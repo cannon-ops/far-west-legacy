@@ -35,7 +35,27 @@ from src.fs_client import FamilySearchClient, FSAuthExpiredError, FSClientError
 from src.version import APP_VERSION, CHANGELOG_TEXT
 
 app = Flask(__name__, template_folder="../templates")
-app.secret_key = os.getenv("FLASK_SECRET_KEY", "dev-secret-change-in-prod")
+
+IS_PRODUCTION = os.getenv("FLASK_ENV", "").lower() == "production"
+
+# The signed session cookie carries fs_sid, which is the only thing standing between a
+# visitor and someone else's FamilySearch session. A guessable secret means a forgeable
+# fs_sid. House rule: no silent fallbacks — production refuses to start without a real key.
+_secret = os.getenv("FLASK_SECRET_KEY", "")
+if not _secret:
+    if IS_PRODUCTION:
+        raise RuntimeError(
+            "FLASK_SECRET_KEY is unset. Refusing to start in production: a default key "
+            "lets anyone forge the session cookie that identifies a FamilySearch session."
+        )
+    _secret = "dev-secret-change-in-prod"
+app.secret_key = _secret
+
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=IS_PRODUCTION,
+)
 
 BASE_DIR = Path(__file__).parent.parent
 TMP_DIR = BASE_DIR / "tmp"
@@ -305,6 +325,19 @@ def auth_callback():
     return redirect(url_for("tool"))
 
 
+@app.post("/auth/logout")
+def auth_logout():
+    """Explicit sign-out. On a shared booth device this is the control that stops the next
+    visitor inheriting the last one's FamilySearch session, so it is a POST (no drive-by
+    logout via a prefetched link) and it clears both the server-side token and the cookie."""
+    sid = session.pop("fs_sid", None)
+    if sid:
+        fs_auth.clear_session(sid)
+    session.pop("fs_oauth_state", None)
+    record_activity("fs_auth_signed_out")
+    return redirect(url_for("tool"))
+
+
 # ---------------------------------------------------------------------------
 # FWL 010 routes: match-check + confirm-gate (M2.2)
 # ---------------------------------------------------------------------------
@@ -423,8 +456,10 @@ def inject_version():
 
 @app.context_processor
 def inject_fs_user():
+    # peek, not get: rendering a page must not slide the idle window, or a tab left open
+    # on the kiosk would keep a walked-away visitor signed in indefinitely.
     sid = session.get("fs_sid")
-    fs_session = fs_auth.get_session(sid) if sid else None
+    fs_session = fs_auth.peek_session(sid) if sid else None
     return {"fs_display_name": fs_session["display_name"] if fs_session else None}
 
 
@@ -440,6 +475,12 @@ def changelog():
 
 @app.route("/logs")
 def logs():
+    # These buffers hold FamilySearch display names and raw API error bodies. On a booth
+    # kiosk that means one visitor could read the previous visitor's name out of /logs, so
+    # production serves it only when explicitly opted in. Also note the buffers are
+    # per-worker: under `gunicorn -w 2` a request sees one worker's half of the log.
+    if IS_PRODUCTION and os.getenv("FWL_LOGS_PUBLIC", "").lower() not in ("1", "true", "yes"):
+        return jsonify({"error": "Logs are disabled in production."}), 404
     return jsonify({
         "app": list(APP_LOG_BUFFER),
         "activity": ACTIVITY_LOG,

@@ -10,14 +10,15 @@ from urllib.parse import parse_qs, urlparse
 import httpx
 import pytest
 
-from src import fs_auth
+from src import fs_auth, token_store
 
 
 @pytest.fixture(autouse=True)
-def _clear_pending():
-    fs_auth._PENDING.clear()
+def _isolated_store(tmp_path, monkeypatch):
+    """Point every test at its own store file, same pattern as test_token_store.py —
+    fs_auth's pending/session state is backed by token_store, not a module dict."""
+    monkeypatch.setenv("FWL_TOKEN_STORE_PATH", str(tmp_path / "store.sqlite3"))
     yield
-    fs_auth._PENDING.clear()
 
 
 class TestBuildAuthorizeUrl:
@@ -31,7 +32,7 @@ class TestBuildAuthorizeUrl:
         assert params["state"] == [state]
         assert params["code_challenge_method"] == ["S256"]
         assert "code_challenge" in params
-        assert fs_auth._PENDING[state]["code_verifier"] is not None
+        assert token_store.pop_pending(state)["code_verifier"] is not None
 
     def test_pkce_off_omits_challenge_params(self):
         url, state = fs_auth.build_authorize_url("client-x", "http://localhost:8081/callback", use_pkce=False)
@@ -39,7 +40,7 @@ class TestBuildAuthorizeUrl:
 
         assert "code_challenge" not in params
         assert "code_challenge_method" not in params
-        assert fs_auth._PENDING[state]["code_verifier"] is None
+        assert token_store.pop_pending(state)["code_verifier"] is None
 
     def test_default_use_pkce_follows_module_default(self, monkeypatch):
         monkeypatch.setattr(fs_auth, "DEFAULT_USE_PKCE", False)
