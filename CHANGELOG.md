@@ -5,6 +5,35 @@ Format: session number, date, milestone label, summary of changes.
 
 ---
 
+## Session 011-H3 Phase 3 (2026-08-10) — Verify Render Free-Tier Assumptions (Report Only)
+
+No code changed — verification and documentation only, per this phase's own instruction.
+
+- Checked `token_store.py`'s two Render assumptions against Render's own docs (not
+  assumed, cross-checked across independent fetches): **(a) single instance on the free
+  plan — confirmed true.** **(b) "deploys stop the old instance before starting the
+  new one" — confirmed false.** Render does zero-downtime rolling deploys: the new
+  instance boots and passes its health check while the old instance keeps serving all
+  traffic, then traffic switches (a cutover) to the new instance, then the old instance
+  gets `SIGTERM` 60 seconds later. No free/paid distinction; the one documented exception
+  (a persistent disk disables zero-downtime deploys) doesn't apply here — `render.yaml`
+  has no `disk:` section by design.
+- **Practical impact:** each Render instance is its own container with its own ephemeral
+  filesystem, so the old and new instances don't share a SQLite file during the ~60–90
+  second overlap the way two gunicorn workers *inside one instance* do. A user whose
+  `/auth/login` lands on the old instance and whose `/callback` lands on the new one
+  after cutover hits the same "Unknown or expired OAuth state" failure H3 fixed at the
+  gunicorn-worker level — possible again at the instance-transition level. Same for an
+  in-progress session or M2.2 decisions file spanning a deploy: lost, not corrupted.
+  Requires a deploy to land while a real user is mid-flow and the instance hadn't already
+  spun down — narrow, not hypothetical, given `autoDeploy: true`.
+- Design not changed per this phase's instruction. H3's own report already scoped the fix
+  (Redis, confined to `token_store.py`) if this assumption turned out wrong — it did.
+  Chief's call whether the narrow window is worth closing before Chautauqua.
+- Full detail: `repo-memory.md` Pending Decisions.
+
+---
+
 ## Session 011-H3 Phase 2 (2026-08-10) — Generalize StithSource, Evaluate Resthaven
 
 - Confirmed live (2026-08-10) that Resthaven Mortuary / Slater Neal Funeral Home
