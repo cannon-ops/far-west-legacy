@@ -206,7 +206,9 @@ def extract():
 def search_stith():
     query = request.form.get("stith_query", "").strip()
     if not query:
-        return render_template("index.html", error="Enter a name to search Stith Family Funeral Home.")
+        return render_template(
+            "index.html", error="Enter a name to search Stith Family Funeral Home.",
+        )
 
     source = StithSource()
     try:

@@ -5,6 +5,34 @@ Format: session number, date, milestone label, summary of changes.
 
 ---
 
+## Session 011-H3 Phase 2 (2026-08-10) — Generalize StithSource, Evaluate Resthaven
+
+- Confirmed live (2026-08-10) that Resthaven Mortuary / Slater Neal Funeral Home
+  (resthavenmort.com, Trenton) runs the identical CFS/TributeArchive platform as Stith —
+  byte-for-byte matching markup, `robots.txt` shape, and `/pax/obitsrch`
+  pagination/search mechanics.
+- `src/sources/cfs_source.py` — `StithSource`'s implementation generalized into
+  `CFSObituarySource(base_url, sitemap_path)`. `src/sources/stith_source.py` is now a
+  thin subclass; `src/sources/resthaven_source.py` adds the second tenant.
+- **`ResthavenSource` is built but not wired into `app.py` or `cli.py`.** Every real
+  endpoint on resthavenmort.com returns Cloudflare's "Attention Required!" 403 to both
+  `requests` and `httpx` (already used elsewhere in this app), with full browser-like
+  headers, while `curl` with an identical User-Agent succeeds every time — a TLS/client
+  fingerprint block, confirmed reproducible across multiple attempts over several
+  minutes, ruled out as UA/headers/rate-limiting. A fix needs a different HTTP client
+  (e.g. `curl_cffi`) or a `curl` subprocess — a real architecture decision, not made here.
+- `tests/test_cfs_source.py` (new) — generic parsing/behavior tests against a fake
+  tenant, tested once instead of duplicated per site. `tests/test_stith_source.py`
+  slimmed to Stith's own config + live-network confirmation.
+  `tests/test_resthaven_source.py` (new) — same thin pattern; its live-network class is
+  `xfail` (documents the Cloudflare block, doesn't silently vanish) rather than
+  skipped/deleted.
+- Full suite: 193 passed, 9 skipped (up from 183+6).
+- `cannonops-vault/Projects/FWL/Obituary-Source-Candidates.md` updated: Resthaven moved
+  from "new candidate, not yet checked" to "checked, blocked" with the finding.
+
+---
+
 ## Session 011-H3 Phase 1 (2026-08-10) — Wire Stith Name Search into the Flask UI
 
 - `templates/index.html` gained a third input channel on `/tool`: a "Search Stith
