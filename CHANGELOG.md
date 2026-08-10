@@ -5,6 +5,30 @@ Format: session number, date, milestone label, summary of changes.
 
 ---
 
+## Session 011-H3 Phase 1 (2026-08-10) — Wire Stith Name Search into the Flask UI
+
+- `templates/index.html` gained a third input channel on `/tool`: a "Search Stith
+  Family Funeral Home (by name)" panel below the existing paste/URL form.
+- `POST /search/stith` — searches via `StithSource.search()`, renders
+  `templates/stith_results.html` (new) listing matches (name + date, one "Extract →"
+  button each) or a "no matches" message.
+- `POST /search/stith/extract` — fetches the picked match's full text and lands on the
+  same `/review/<job_id>` page the paste/URL path already produces. Validates the posted
+  `detail_url` starts with Stith's own base URL before fetching it server-side (the
+  hidden form field is client-controlled — an unvalidated fetch there would be an SSRF
+  path).
+- `src/app.py` — factored `/extract`'s save-and-redirect tail into `_extract_and_save()`,
+  shared by all three input channels now (paste, URL, Stith) instead of duplicated.
+- Tests: `tests/test_app_stith_search.py`, 10 route tests (`StithSource` and
+  `extract_from_text` monkeypatched to fakes, same pattern as `test_app_upload.py`'s
+  `FakeMatchClient`). Full suite: 183 passed, 6 skipped (up from 173+6).
+- Live-tested end to end against a real name (Hughes) in a real browser session against
+  a running dev server — search → pick → extract (real Claude API call) → review page
+  showed correctly extracted fields (`given_names="Daniel B."`, `surname="Hughes"`).
+- Did not touch `fs_auth.py`, `fs_client.py`, or anything OAuth-related.
+
+---
+
 ## Session 011-H2 Phase 2 (2026-08-09) — Pluggable ObituarySource Interface + Stith Adapter
 
 - `src/obituary_source.py` — `ObituarySource` Protocol (`check_access`, `list_recent`,

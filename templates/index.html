@@ -58,6 +58,24 @@
   </form>
 </div>
 
+<div style="display: flex; align-items: center; gap: 1rem; margin: 0.75rem 0; color: var(--muted); font-family: sans-serif; font-size: 0.85rem;">
+  <hr style="flex:1; border: none; border-top: 1px solid var(--border);">
+  <span>or</span>
+  <hr style="flex:1; border: none; border-top: 1px solid var(--border);">
+</div>
+
+<div class="card">
+  <form method="post" action="/search/stith">
+    <div class="field">
+      <label for="stith_query">Search Stith Family Funeral Home <span style="font-weight:normal;text-transform:none;">(by name)</span></label>
+      <div style="display:flex; gap:0.5rem;">
+        <input type="text" id="stith_query" name="stith_query" placeholder="e.g. Hughes" style="flex:1;">
+        <button type="submit" class="btn btn-secondary">Search &rarr;</button>
+      </div>
+    </div>
+  </form>
+</div>
+
 <style>
   .field-header {
     display: flex;

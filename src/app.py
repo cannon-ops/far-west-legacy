@@ -3,8 +3,10 @@ app.py — Flask review UI for the Far West Legacy obituary extraction pipeline.
 
 Routes:
   GET  /                        — marketing homepage (farwestlegacy.com landing)
-  GET  /tool                    — paste/URL input form
+  GET  /tool                    — paste/URL/Stith-search input form
   POST /extract                 — run extraction, redirect to review
+  POST /search/stith            — Stith Family Funeral Home name search, list matches
+  POST /search/stith/extract    — fetch a picked match, extract, redirect to review
   GET  /review/<job_id>         — editable review form
   POST /approve/<job_id>        — save approved JSON to output/
   GET  /auth/login, /callback   — FamilySearch OAuth2 sign-in (M2.0)
@@ -32,6 +34,9 @@ from src import fs_auth, fs_map
 from src.extract import ExtractionError, extract_from_text
 from src.fetch import FetchError, fetch_obituary_text
 from src.fs_client import FamilySearchClient, FSAuthExpiredError, FSClientError
+from src.obituary_source import SearchUnavailable
+from src.sources.stith_source import BASE_URL as STITH_BASE_URL
+from src.sources.stith_source import StithSource, StithSourceError
 from src.version import APP_VERSION, CHANGELOG_TEXT
 
 app = Flask(__name__, template_folder="../templates")
@@ -134,6 +139,18 @@ def _output_filename(deceased: dict) -> str:
     return f"{surname}_{given}.json"
 
 
+def _extract_and_save(obituary_text: str, source_url: str, activity_source: str) -> str:
+    """Shared tail of every input channel (paste, URL fetch, Stith search): run
+    extraction, write tmp/<job_id>.json, log activity. Returns the new job_id.
+    Raises ExtractionError — callers render their own error context per channel."""
+    result = extract_from_text(obituary_text, source_url=source_url)
+    job_id = str(uuid.uuid4())
+    TMP_DIR.mkdir(exist_ok=True)
+    _tmp_path(job_id).write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+    record_activity("extract_ok", job_id=job_id, source=activity_source)
+    return job_id
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -171,7 +188,7 @@ def extract():
         return render_template("index.html", error=error)
 
     try:
-        result = extract_from_text(obituary_text, source_url=source_url)
+        job_id = _extract_and_save(obituary_text, source_url, "url" if source_url else "paste")
     except ExtractionError as exc:
         error = f"Extraction failed: {exc}"
         record_activity("extract_error", error_type="ExtractionError", message=str(exc))
@@ -182,11 +199,54 @@ def extract():
             source_url=source_url,
         )
 
-    job_id = str(uuid.uuid4())
-    TMP_DIR.mkdir(exist_ok=True)
-    _tmp_path(job_id).write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+    return redirect(url_for("review", job_id=job_id))
 
-    record_activity("extract_ok", job_id=job_id, source=("url" if source_url else "paste"))
+
+@app.post("/search/stith")
+def search_stith():
+    query = request.form.get("stith_query", "").strip()
+    if not query:
+        return render_template("index.html", error="Enter a name to search Stith Family Funeral Home.")
+
+    source = StithSource()
+    try:
+        results = source.search(query)
+    except StithSourceError as exc:
+        record_activity("stith_search_error", error=str(exc))
+        return render_template("index.html", error=f"Stith search failed: {exc}")
+
+    if isinstance(results, SearchUnavailable):
+        return render_template("index.html", error=f"Stith search unavailable: {results.reason}")
+
+    record_activity("stith_search", query=query, result_count=len(results))
+    return render_template("stith_results.html", query=query, results=results)
+
+
+@app.post("/search/stith/extract")
+def search_stith_extract():
+    detail_url = request.form.get("detail_url", "").strip()
+    if not detail_url.startswith(STITH_BASE_URL):
+        return render_template("index.html", error="Invalid obituary link.")
+
+    source = StithSource()
+    try:
+        detail = source.fetch_detail(detail_url)
+    except StithSourceError as exc:
+        record_activity("stith_fetch_error", error=str(exc))
+        return render_template("index.html", error=f"Could not fetch obituary: {exc}")
+
+    try:
+        job_id = _extract_and_save(detail.text, detail.source_url, "stith")
+    except ExtractionError as exc:
+        error = f"Extraction failed: {exc}"
+        record_activity("extract_error", error_type="ExtractionError", message=str(exc))
+        return render_template(
+            "index.html",
+            error=error,
+            obituary_text=detail.text,
+            source_url=detail.source_url,
+        )
+
     return redirect(url_for("review", job_id=job_id))
 
 
