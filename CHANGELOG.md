@@ -5,6 +5,36 @@ Format: session number, date, milestone label, summary of changes.
 
 ---
 
+## Session 011-H2 Phase 2 (2026-08-09) — Pluggable ObituarySource Interface + Stith Adapter
+
+- `src/obituary_source.py` — `ObituarySource` Protocol (`check_access`, `list_recent`,
+  `fetch_detail`, `search`-with-`SearchUnavailable`-fallback) plus `AccessLevel`,
+  `ObituaryStub`, `ObituaryDetail`. Shape taken from the FWL-011-H1 TriCounty recon's
+  proposal, adjusted once code was written against a real source: Stith's `search()`
+  returns real results, not `SearchUnavailable`, because a working non-`/pax/` search
+  turned out to be buildable.
+- `src/sources/stith_source.py` — adapter for `stithfamilyfunerals.com`. **Deviates from
+  the brief's "use the real search form/pagination" on purpose:** both route through
+  `POST /pax/obitsrch` (confirmed from the listings page's own inline JS), and
+  `robots.txt` disallows `/pax/` outright. `list_recent()`/`search()` are built instead
+  from `sth/obituary_sitemap.xml` (an explicit `robots.txt` `Sitemap:` entry, 500 URLs +
+  `lastmod`, unrestricted); `fetch_detail()` hits `/obituary/<slug>` directly. Also
+  corrects the brief: live `robots.txt` carries no `Crawl-delay` for this site at all — a
+  self-imposed 1s courtesy delay is applied anyway, not directive-derived.
+- **Pipeline compatibility confirmed against 3 real live obituaries** (Hughes, Ranes,
+  Wilson): `extract_from_text(detail.text, detail.source_url)` runs with zero glue code —
+  `ObituaryDetail.text` is already in the same clean-plain-text shape `fetch.py` produces
+  (reuses its `_clean_whitespace`).
+- `src/cli.py` — new `--stith-search NAME` mode: search → numbered picker → fetch → same
+  extract-and-save path as `--url`. Not wired into the Flask UI (deliberately kept
+  standalone; `app.py`/`fetch.py`/`fs_*.py` untouched).
+- Tests: `tests/test_stith_source.py`, 23 offline + 3 live-network (`RUN_NETWORK_TESTS=1`).
+  Full suite: 173 passed, 6 skipped (up from 150+3).
+- TriCounty Weekly explicitly out of scope this session (pending business conversation).
+- Ledger row L-039 → DONE.
+
+---
+
 ## Session 010-H3 merge (2026-08-09) — Multi-Worker-Safe Token Store + Booth Hardening
 
 **Version: 0.7.0** (same milestone as H2, prod-hardening layer merged in alongside it)
