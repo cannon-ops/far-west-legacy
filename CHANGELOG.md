@@ -5,6 +5,49 @@ Format: session number, date, milestone label, summary of changes.
 
 ---
 
+## Session 012-H1 (2026-08-11) — Unified Search: Source Registry Replaces Per-Source Panels
+
+Tier 2 of the Obituary Discovery Roadmap (`cannonops-vault/Projects/FWL/Obituary-Discovery-Roadmap.md`,
+decided 2026-08-10): one search box instead of one button per source.
+
+- **`src/sources/registry.py` (new)** — `SOURCES: list[SourceEntry]`, each entry holding a
+  `key`, `label`, `base_url`, a zero-arg `factory` returning an `ObituarySource` instance,
+  and the source's own exception type. Currently `StithSource` and `ResthavenSource`.
+  Nothing else in `app.py` names a source by class — both routes below iterate `SOURCES`.
+- **`src/app.py`** — the four hand-wired routes (`/search/stith`, `/search/stith/extract`,
+  `/search/resthaven`, `/search/resthaven/extract`) replaced with two generic ones:
+  `POST /search` (fans `query` out across every `SOURCES` entry, merges results into one
+  list tagged with `source_key`/`source_label`; a per-source error or `SearchUnavailable`
+  becomes a warning banner and does not block the other sources' results) and
+  `POST /search/extract` (looks up the posted `source` key in `SOURCES`, then validates
+  `detail_url` against *that entry's own* `base_url` before fetching — same SSRF guard
+  both old routes had, now per-registry-entry instead of duplicated per route). Both reuse
+  `_extract_and_save()` and land on the existing `/review/<job_id>` flow unchanged.
+- **UI** — `templates/index.html`'s two per-source search panels replaced with one "Search
+  obituaries by name" box posting to `/search`. `templates/stith_results.html` and
+  `templates/resthaven_results.html` deleted; `templates/search_results.html` (new) renders
+  the merged, tagged list with one "Extract" button per result.
+- **Tests** — `tests/test_app_stith_search.py` and `tests/test_app_resthaven_search.py`
+  deleted (routes no longer exist); `tests/test_app_search.py` (new, 15 tests) covers the
+  merge/tag behavior, one-source-fails-doesn't-block-the-other, unknown source key, and the
+  cross-source SSRF case (a Resthaven `detail_url` submitted with `source=stith` must be
+  rejected, not just any-domain rejected). Full suite: 199 passed, 9 skipped.
+- **Live-tested end to end** against the real running dev server (not mocked): searched
+  "Hughes" and got real merged, correctly-tagged results from both Stith and Resthaven;
+  extracted one result from each source through the real Claude API, both landing on a
+  populated `/review/<job_id>`; confirmed the cross-source SSRF guard rejects a
+  same-domain-family-but-wrong-entry URL. Browser snapshot of `/tool` confirmed exactly one
+  search box, no leftover per-source panels.
+- `cfs_source.py`, `resthaven_source.py`, `stith_source.py`, `obituary_source.py`, and
+  `cli.py` (which has its own separate `--stith-search`/`--resthaven-search` CLI flags, out
+  of scope for this UI-only consolidation) are untouched.
+- Adding a third source: implement `ObituarySource`, then append one `SourceEntry` to
+  `src/sources/registry.py`'s `SOURCES` list. No route, template, or route-test changes
+  needed — `POST /search` and `POST /search/extract` are already generic over the list.
+- Report: `cannonops-vault/Handoff-Status/2026-08-11-FWL-012-H1-Unified-Search.md`.
+
+---
+
 ## Session 011-H3 Phase 3 (2026-08-10) — Verify Render Free-Tier Assumptions (Report Only)
 
 No code changed — verification and documentation only, per this phase's own instruction.

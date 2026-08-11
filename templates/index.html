@@ -65,23 +65,11 @@
 </div>
 
 <div class="card">
-  <form method="post" action="/search/stith">
+  <form method="post" action="/search">
     <div class="field">
-      <label for="stith_query">Search Stith Family Funeral Home <span style="font-weight:normal;text-transform:none;">(by name)</span></label>
+      <label for="search_query">Search obituaries by name <span style="font-weight:normal;text-transform:none;">(searches every registered source)</span></label>
       <div style="display:flex; gap:0.5rem;">
-        <input type="text" id="stith_query" name="stith_query" placeholder="e.g. Hughes" style="flex:1;">
-        <button type="submit" class="btn btn-secondary">Search &rarr;</button>
-      </div>
-    </div>
-  </form>
-</div>
-
-<div class="card">
-  <form method="post" action="/search/resthaven">
-    <div class="field">
-      <label for="resthaven_query">Search Resthaven Mortuary <span style="font-weight:normal;text-transform:none;">(by name)</span></label>
-      <div style="display:flex; gap:0.5rem;">
-        <input type="text" id="resthaven_query" name="resthaven_query" placeholder="e.g. Barb" style="flex:1;">
+        <input type="text" id="search_query" name="query" placeholder="e.g. Hughes" style="flex:1;">
         <button type="submit" class="btn btn-secondary">Search &rarr;</button>
       </div>
     </div>

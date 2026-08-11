@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Search Results — Far West Legacy{% endblock %}
+
+{% block content %}
+<h2>Results for &ldquo;{{ query }}&rdquo;</h2>
+
+{% for warning in warnings %}
+<div class="alert alert-error">{{ warning }}</div>
+{% endfor %}
+
+{% if not results %}
+<div class="card">
+  <p>No matches found for &ldquo;{{ query }}&rdquo;.</p>
+  <p><a href="/tool">&larr; Back to search</a></p>
+</div>
+{% else %}
+<div class="card">
+  {% for r in results %}
+  <div class="search-result">
+    <div>
+      <strong>{{ r.stub.name }}</strong>
+      <span class="search-result-source">{{ r.source_label }}</span>
+      <span class="search-result-date">{{ r.stub.date or "date unknown" }}</span>
+    </div>
+    <form method="post" action="/search/extract" style="margin: 0;">
+      <input type="hidden" name="source" value="{{ r.source_key }}">
+      <input type="hidden" name="detail_url" value="{{ r.stub.detail_url }}">
+      <button type="submit" class="btn btn-primary">Extract &rarr;</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+<p><a href="/tool">&larr; Back to search</a></p>
+{% endif %}
+
+<style>
+  .search-result {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 0.5rem;
+  }
+  .search-result-source {
+    display: inline-block;
+    margin-left: 0.5rem;
+    color: var(--accent);
+    font-family: sans-serif;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .search-result-date {
+    display: block;
+    color: var(--muted);
+    font-family: sans-serif;
+    font-size: 0.8rem;
+  }
+</style>
+{% endblock %}
