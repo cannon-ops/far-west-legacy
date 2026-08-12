@@ -258,11 +258,18 @@ class FamilySearchClient:
             logger.error("fs_client: match search failed: %s %s", resp.status_code, body_preview)
             raise FSClientError(f"Match search failed: HTTP {resp.status_code}, body: {body_preview!r}")
 
-        # A 2xx/3xx status does not guarantee a parseable JSON body — confirmed live
-        # 2026-08-12 (FWL-012-H7): FamilySearch can return a response resp.json() chokes
-        # on (json.decoder.JSONDecodeError: "Expecting value"), which previously reached
-        # Flask's debugger raw instead of the app's normal error handling. Never assume
-        # .json() succeeds just because the status check passed.
+        # FamilySearch returns 204 No Content — no body at all — when the search finds
+        # zero candidates, rather than 200 with an empty envelope. Confirmed live
+        # 2026-08-12 (FWL-012-H8): this is a legitimate "no matches" outcome, not a parse
+        # failure, and must not be treated as an error.
+        if resp.status_code == 204:
+            return []
+
+        # A 2xx/3xx status does not otherwise guarantee a parseable JSON body — confirmed
+        # live 2026-08-12 (FWL-012-H7): FamilySearch can return a response resp.json()
+        # chokes on (json.decoder.JSONDecodeError: "Expecting value"), which previously
+        # reached Flask's debugger raw instead of the app's normal error handling. Never
+        # assume .json() succeeds just because the status check passed.
         try:
             payload = resp.json()
         except json.JSONDecodeError as exc:

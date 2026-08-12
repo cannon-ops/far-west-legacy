@@ -353,6 +353,18 @@ class TestSearchMatches:
                                      transport=httpx.MockTransport(handler))
         assert client.search_matches({"names": []}) == []
 
+    def test_204_no_content_returns_empty_list(self, tmp_path):
+        """FamilySearch returns 204 (no body at all), not 200 with an empty envelope, when
+        a search finds zero candidates — confirmed live 2026-08-12 (FWL-012-H8). This is a
+        legitimate no-matches outcome, not a parse failure the caller should ever see as
+        an error."""
+        def handler(request):
+            return httpx.Response(204)
+
+        client = FamilySearchClient(access_token="tok", dry_run=False, journal_path=tmp_path / "journal.json",
+                                     transport=httpx.MockTransport(handler))
+        assert client.search_matches({"names": []}) == []
+
     def test_unexpected_shape_degrades_to_empty_list(self, tmp_path):
         def handler(request):
             return httpx.Response(200, json={"something_else": True})
