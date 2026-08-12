@@ -254,10 +254,25 @@ class FamilySearchClient:
         if resp.status_code == 401:
             raise FSAuthExpiredError("FamilySearch session expired — re-auth required")
         if resp.status_code >= 400:
-            logger.error("fs_client: match search failed: %s %s", resp.status_code, resp.text)
-            raise FSClientError(f"Match search failed: HTTP {resp.status_code}")
+            body_preview = resp.text[:500]
+            logger.error("fs_client: match search failed: %s %s", resp.status_code, body_preview)
+            raise FSClientError(f"Match search failed: HTTP {resp.status_code}, body: {body_preview!r}")
 
-        return _parse_match_candidates(resp.json())
+        # A 2xx/3xx status does not guarantee a parseable JSON body — confirmed live
+        # 2026-08-12 (FWL-012-H7): FamilySearch can return a response resp.json() chokes
+        # on (json.decoder.JSONDecodeError: "Expecting value"), which previously reached
+        # Flask's debugger raw instead of the app's normal error handling. Never assume
+        # .json() succeeds just because the status check passed.
+        try:
+            payload = resp.json()
+        except json.JSONDecodeError as exc:
+            body_preview = resp.text[:500]
+            logger.error("fs_client: match search returned unparseable body: %s %s", resp.status_code, body_preview)
+            raise FSClientError(
+                f"Match search returned an unparseable response: HTTP {resp.status_code}, body: {body_preview!r}"
+            ) from exc
+
+        return _parse_match_candidates(payload)
 
     def _send_live(self, step: str, method: str, url: str, body: dict | None, digest: str) -> str | None:
         # Intent before outcome: if the process dies between here and _settle, the journal

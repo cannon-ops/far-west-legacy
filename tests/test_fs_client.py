@@ -379,6 +379,31 @@ class TestSearchMatches:
         with pytest.raises(FSClientError):
             client.search_matches({"names": []})
 
+    def test_4xx_error_message_includes_real_body_text(self, tmp_path):
+        """The raised exception must carry FamilySearch's actual body, not just the status
+        code — the original gap FWL-012-H4 hit: the app's error only ever showed "HTTP 400"
+        while the real cause sat in a body only logger.error() saw, never the exception."""
+        def handler(request):
+            return httpx.Response(400, text='{"errors":[{"message":"The gedcomx must contain a descriptionRef."}]}')
+
+        client = FamilySearchClient(access_token="tok", dry_run=False, journal_path=tmp_path / "journal.json",
+                                     transport=httpx.MockTransport(handler))
+        with pytest.raises(FSClientError, match="descriptionRef"):
+            client.search_matches({"names": []})
+
+    def test_2xx_with_unparseable_body_raises_fs_client_error_not_crash(self, tmp_path):
+        """FamilySearch can return a 2xx whose body isn't valid JSON (confirmed live
+        2026-08-12, FWL-012-H7: json.decoder.JSONDecodeError reached Flask's debugger raw
+        instead of the app's normal error handling). A response that passes the status
+        checks must never be assumed to parse cleanly."""
+        def handler(request):
+            return httpx.Response(200, text="")
+
+        client = FamilySearchClient(access_token="tok", dry_run=False, journal_path=tmp_path / "journal.json",
+                                     transport=httpx.MockTransport(handler))
+        with pytest.raises(FSClientError, match="HTTP 200"):
+            client.search_matches({"names": []})
+
     def test_not_journaled(self, tmp_path):
         """Match search isn't a write — it must not appear in the resumable journal."""
         def handler(request):
