@@ -13,6 +13,7 @@ blind-retried.
 import hashlib
 import json
 import logging
+import re
 import time
 from pathlib import Path
 
@@ -32,11 +33,11 @@ CHILD_AND_PARENTS_RELATIONSHIPS_PATH = "/platform/tree/child-and-parents-relatio
 SOURCE_DESCRIPTIONS_PATH = "/platform/sources/descriptions"
 
 # Person Matches by Example resource (plan §3.1, §8). Path and query params
-# (count, confidence 1-5) confirmed via developers.familysearch.org this session
-# (2026-08-08); the exact response envelope shape was NOT verifiable against live
-# docs without a working access token (M2.0 auth is currently broken — see
-# repo-memory.md Pending Decisions), so `_parse_match_candidates` below is
-# best-effort and defensive, not confirmed live. Re-verify at M2.3 build time.
+# (count, confidence 1-5) confirmed via developers.familysearch.org 2026-08-08.
+# The response envelope shape was originally guessed (not verifiable without a
+# working access token) — confirmed live 2026-08-12 (FWL-012-H9) against a real
+# match, see _parse_match_candidates()/_principal_person()/MATCH_BUCKET_* for what
+# the guess got wrong.
 MATCHES_PATH = "/platform/tree/matches"
 
 # FamilySearch's own docs (Read Person Matches using Gedcomx usecase, fetched live
@@ -54,16 +55,25 @@ MATCHES_PATH = "/platform/tree/matches"
 MATCH_PRIMARY_PERSON_ID = "primary"
 MATCH_SOURCE_DESCRIPTION_ID = "sourceDescription"
 
-# Placeholder bucket cutoffs against FS's 1-5 confidence scale (plan §9 open
-# question 5 — "tuned empirically against beta during M2.2"). Cannot be tuned
-# empirically until a live token exists; these are a reasonable starting split,
-# not a measured threshold. Revisit once real match responses are seen.
-MATCH_BUCKET_STRONG_MIN = 4
-MATCH_BUCKET_POSSIBLE_MIN = 2
+# Bucket cutoffs against FS's real `score` field — a 0.0-1.0 similarity float
+# (confirmed live 2026-08-12, FWL-012-H9: a name/date/place-exact match scored
+# 0.9998555), not the 1-5 integer scale originally guessed here before any real
+# match response had been seen. `entry.confidence` also exists in the real payload
+# (value 5 for that same match) but is a different, uncalibrated field — not the
+# 1-5 quality scale it was assumed to be, since a value of 5 there did not track a
+# near-perfect 0.9998555 score. Only `score` is used for bucketing now (see
+# _parse_match_candidates). These cutoffs are anchored to one confirmed real data
+# point at the top of the scale; still not empirically tuned in the middle —
+# revisit if a genuinely "possible" or "weak" real match is ever seen.
+MATCH_BUCKET_STRONG_MIN = 0.90
+MATCH_BUCKET_POSSIBLE_MIN = 0.50
+
+_YEAR_RE = re.compile(r"\b(\d{4})\b")
 
 
 def bucket_for_confidence(confidence: float | int | None) -> str:
-    """Placeholder Strong/Possible/Weak bucketing (see MATCH_BUCKET_* above)."""
+    """Strong/Possible/Weak bucketing against FS's real 0.0-1.0 `score` scale
+    (see MATCH_BUCKET_* above)."""
     if confidence is None:
         return "weak"
     if confidence >= MATCH_BUCKET_STRONG_MIN:
@@ -87,23 +97,60 @@ def _display_name(person: dict) -> str:
     return "(name unavailable)"
 
 
+def _year_from_display_date(date_str: str) -> str:
+    """FamilySearch's `display.birthDate`/`display.deathDate` are natural-language
+    strings ("8 February 1935"), not ISO dates — pull the year out for a lifespan
+    display. Confirmed live 2026-08-12 (FWL-012-H9)."""
+    if not date_str:
+        return ""
+    m = _YEAR_RE.search(date_str)
+    return m.group(1) if m else ""
+
+
+def _lifespan_from_display(display: dict) -> str:
+    """FamilySearch's real `display` object has no `lifespan` field at all — confirmed
+    live 2026-08-12 (FWL-012-H9), it was a guessed key that never matched anything,
+    so this always rendered blank in production. Derives one from the real
+    `birthDate`/`deathDate` fields instead. `display.get("lifespan")` is still tried
+    first in case some other response shape does send a pre-formatted one."""
+    if display.get("lifespan"):
+        return display["lifespan"]
+    birth_year = _year_from_display_date(display.get("birthDate", ""))
+    death_year = _year_from_display_date(display.get("deathDate", ""))
+    if not birth_year and not death_year:
+        return ""
+    return f"{birth_year or '?'}–{death_year or '?'}"
+
+
+def _principal_person(entry: dict) -> dict:
+    """The matched person lives at entry.content.gedcomx.persons, flagged
+    `"principal": true` — confirmed live 2026-08-12 (FWL-012-H9): a real match
+    entry carried 4 persons (the match itself plus her father, mother, and husband,
+    included by FamilySearch for context), not the single `entry.person` this code
+    previously assumed. Falls back to the old guessed shape if no principal person
+    is found, rather than raising, matching this module's existing degrade-gracefully
+    philosophy for an unexpected response shape."""
+    persons = entry.get("content", {}).get("gedcomx", {}).get("persons", [])
+    for person in persons:
+        if person.get("principal"):
+            return person
+    return entry.get("person", entry)
+
+
 def _parse_match_candidates(payload: dict) -> list[dict]:
-    """Best-effort parse of a Person Matches by Example response into a flat
-    candidate list. FamilySearch's response envelope was not verifiable live this
-    session (see MATCHES_PATH note) — tries the shapes documented for FS person
-    search/match resources and degrades to an empty list rather than raising if
-    neither is present, so an unexpected shape shows "no matches" instead of
-    crashing the match-check screen."""
+    """Parse a Person Matches by Example response into a flat candidate list.
+    Confirmed live 2026-08-12 (FWL-012-H9) against a real match — see
+    _principal_person() and MATCH_BUCKET_* for what was wrong and what changed."""
     entries = payload.get("persons") or payload.get("entries") or []
     candidates = []
     for entry in entries:
-        person = entry.get("person", entry)
-        confidence = entry.get("score") if entry.get("score") is not None else entry.get("confidence")
+        person = _principal_person(entry)
+        confidence = entry.get("score")
         display = person.get("display") or {}
         candidates.append({
             "pid": person.get("id"),
             "name": _display_name(person),
-            "lifespan": display.get("lifespan", ""),
+            "lifespan": _lifespan_from_display(display),
             "confidence": confidence,
             "bucket": bucket_for_confidence(confidence),
         })

@@ -286,16 +286,21 @@ class TestValidationErrorHalts:
 
 
 class TestBucketForConfidence:
+    """Thresholds are against FamilySearch's real `score` field — a 0.0-1.0 float,
+    confirmed live 2026-08-12 (FWL-012-H9) against a real exact-match response
+    (0.9998555), not the 1-5 integer scale originally guessed before any real match
+    had been seen."""
+
     def test_strong(self):
-        assert bucket_for_confidence(5) == "strong"
-        assert bucket_for_confidence(4) == "strong"
+        assert bucket_for_confidence(0.9998555) == "strong"  # the real confirmed value
+        assert bucket_for_confidence(0.90) == "strong"
 
     def test_possible(self):
-        assert bucket_for_confidence(3) == "possible"
-        assert bucket_for_confidence(2) == "possible"
+        assert bucket_for_confidence(0.75) == "possible"
+        assert bucket_for_confidence(0.50) == "possible"
 
     def test_weak(self):
-        assert bucket_for_confidence(1) == "weak"
+        assert bucket_for_confidence(0.25) == "weak"
         assert bucket_for_confidence(0) == "weak"
 
     def test_missing_confidence_is_weak(self):
@@ -318,19 +323,46 @@ class TestSearchMatches:
 
         assert len(calls) == 1
 
-    def test_parses_candidates_with_confidence_and_bucket(self, tmp_path):
+    def test_parses_candidates_against_real_captured_payload_shape(self, tmp_path):
+        """Real Person Matches by Example response, captured live 2026-08-12
+        (FWL-012-H9) against Aletha Gibbons Turley's actual approved record
+        (trimmed to the fields that matter for parsing; real values otherwise) —
+        not a guess. Each entry carries FOUR persons (the match plus her father,
+        mother, and husband, included by FamilySearch for context), only one
+        flagged `"principal": true`; the real confidence signal is `score`
+        (0.9998555, a near-perfect match), not the `confidence` field (5) the
+        original code assumed was a 1-5 quality scale; and `display` has no
+        `lifespan` key at all, only `birthDate`/`deathDate` strings."""
         def handler(request):
             return httpx.Response(200, json={
-                "persons": [
+                "entries": [
                     {
-                        "id": "PID-1",
-                        "score": 5,
-                        "display": {"name": "Donna Sue Neese", "lifespan": "1939-2024"},
-                    },
-                    {
-                        "id": "PID-2",
-                        "confidence": 2,
-                        "display": {"name": "D. Neese", "lifespan": "1940-2023"},
+                        "id": "KWHX-41Y",
+                        "score": 0.9998555,
+                        "confidence": 5,
+                        "content": {
+                            "gedcomx": {
+                                "persons": [
+                                    {
+                                        "id": "KWHX-41Y",
+                                        "principal": True,
+                                        "living": False,
+                                        "display": {
+                                            "name": "Aletha Gibbons",
+                                            "birthDate": "8 February 1935",
+                                            "birthPlace": "Eagar, Apache, Arizona, United States",
+                                            "deathDate": "13 December 2023",
+                                            "deathPlace": "Jameson, Grand River Township, Daviess, Missouri, United States",
+                                            "gender": "Female",
+                                        },
+                                        "names": [{"nameForms": [{"fullText": "Aletha Gibbons"}]}],
+                                    },
+                                    {"id": "KWZM-MLV", "living": False, "display": {"name": "Austin Whitney Gibbons"}},
+                                    {"id": "KWZM-MLR", "living": False, "display": {"name": "Mary B Burk"}},
+                                    {"id": "KWHX-41R", "living": False, "display": {"name": "Arthur Austin Turley"}},
+                                ]
+                            }
+                        },
                     },
                 ]
             })
@@ -339,11 +371,33 @@ class TestSearchMatches:
                                      transport=httpx.MockTransport(handler))
         candidates = client.search_matches({"names": []})
 
+        assert len(candidates) == 1, "the three non-principal context persons must not become extra candidates"
         assert candidates[0] == {
-            "pid": "PID-1", "name": "Donna Sue Neese", "lifespan": "1939-2024",
-            "confidence": 5, "bucket": "strong",
+            "pid": "KWHX-41Y",
+            "name": "Aletha Gibbons",
+            "lifespan": "1935–2023",
+            "confidence": 0.9998555,
+            "bucket": "strong",
         }
-        assert candidates[1]["bucket"] == "possible"
+
+    def test_non_principal_person_never_selected_over_principal(self, tmp_path):
+        """Order in the persons array must not matter — only the principal flag does."""
+        def handler(request):
+            return httpx.Response(200, json={
+                "entries": [{
+                    "score": 0.5,
+                    "content": {"gedcomx": {"persons": [
+                        {"id": "SPOUSE-1", "display": {"name": "Not The Match"}},
+                        {"id": "MATCH-1", "principal": True, "display": {"name": "The Real Match"}},
+                    ]}},
+                }]
+            })
+
+        client = FamilySearchClient(access_token="tok", dry_run=False, journal_path=tmp_path / "journal.json",
+                                     transport=httpx.MockTransport(handler))
+        candidates = client.search_matches({"names": []})
+        assert candidates[0]["pid"] == "MATCH-1"
+        assert candidates[0]["name"] == "The Real Match"
 
     def test_no_matches_returns_empty_list(self, tmp_path):
         def handler(request):
