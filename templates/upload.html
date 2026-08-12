@@ -91,12 +91,12 @@
         </label>
         {% endif %}
         <label>
-          <input type="radio" name="decision_{{ person.key }}" value="create_new"
-            {% if not person.has_strong_or_possible %}checked{% endif %}>
+          <input type="radio" name="decision_{{ person.key }}" value="create_new">
           Create new
         </label>
         <label>
-          <input type="radio" name="decision_{{ person.key }}" value="skip">
+          <input type="radio" name="decision_{{ person.key }}" value="skip"
+            {% if not person.has_strong_or_possible %}checked{% endif %}>
           Skip
         </label>
       </div>
