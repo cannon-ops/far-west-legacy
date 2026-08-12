@@ -187,6 +187,80 @@ exists:
 The commit button stays disabled until every person has a decision. This is the human-confirm
 gate; there is no code path from extraction to a write that bypasses this screen.
 
+### 3.3 Search-order strategy — family context sharpens the common case
+
+**Decision, 2026-08-12 (FWL-012-H11).** Chief's directed strategy, confirmed against
+FamilySearch's actual docs (`developers.familysearch.org`, same source H4-H9 verified live
+against) rather than assumed:
+
+**The problem this fixes:** §3.1 as originally written searches the subject first, in
+isolation. That's backwards for the common case — a fresh obituary's subject is almost always
+new to the tree, but their spouse and parents are frequently already in it. Searching the
+subject alone wastes the one piece of leverage most likely to actually resolve a common name.
+
+**What FamilySearch's Person Matches by Example actually supports — confirmed, not guessed:**
+
+- **Including family members in the same submission measurably improves match accuracy — this
+  is documented, not assumed.** FamilySearch's own docs: *"For more accurate results, the
+  GEDCOM X POST body may (and should whenever possible) contain the main person's parents,
+  spouses, and children."* The matching algorithm considers "all the information given about
+  the person (and the person's parents, children and spouses, if included)."
+- **The family members must be connected to the primary person by a `relationships` entry in
+  the same document, or they're ignored.** Documented directly: *"Persons not specified in a
+  relationship (other than the primary person) will be ignored when matching."* A bare list of
+  extra `persons[]` with no `ParentChild`/`Couple` relationship linking them to the primary
+  does nothing — confirmed via the real worked example (`Read_Person_Matches_using_Gedcomx_usecase`,
+  already quoted in `cannonops-vault/Handoff-Status/FWL-012-H6.md`), which always pairs its
+  extra persons with relationship entries.
+- **Any person in the submitted family group can be the "primary" being matched** — there's
+  nothing that restricts the primary to the obituary's subject. A spouse or parent can be
+  designated primary (via the `sourceDescriptions.about` reference, same mechanism FWL-012-H6
+  already built) with the subject and other relatives included as context persons instead.
+- **What is NOT supported — checked explicitly, not silently assumed absent:** there is no
+  mechanism to reference an *already-confirmed, real* FamilySearch person by persistent ID
+  within a Matches-by-Example submission. Every person in the request body — primary or
+  context — is fresh, hypothetical fact data (a local document `id` like `"father1"`, not a
+  real PID/URL). So a relative confirmed by one search cannot be "plugged in" as a hard anchor
+  for a later search call the way Chief's step 2 first framed it. The equivalent that *is*
+  supported: re-submit that relative's known **facts** (name/dates/places, not their real PID)
+  as a context person in the subject's own search — which the docs confirm does help, just
+  without a database-level guarantee that it's the same tree record.
+
+**The actual implementable sequence, given the above:**
+
+1. **Search spouse and parents first**, each as their own primary-person search, before
+   searching the subject — using whatever facts the obituary already gave for them. Include
+   the *other* known relatives (subject, siblings, etc.) as context persons + relationships in
+   each of these calls too, since that's free accuracy per the docs above.
+2. **Use confirmed relatives' facts as context for the subject's search** (and vice versa — a
+   strong subject match's facts can be added as context for a weak relative's re-search). This
+   is a facts-based accuracy boost, not a PID-anchored guarantee — state that plainly in the
+   UI copy so "confirmed" doesn't imply more certainty than the mechanism actually provides.
+3. **The real, hard linking happens at write time, not search time** (see §4.2 amendment
+   below) — once a relative is confirmed (human picks "Use existing" with a real PID, or the
+   sequence creates them fresh), the subject is created and immediately relationship-linked to
+   that real PID via the standard Couple/Child-and-Parents relationship POST (already the
+   mechanism `_run_upload_sequence()` uses for real PIDs elsewhere — not a new capability to
+   build, just a reordering of when it runs relative to person-creation).
+4. **Unattached subject creation is the true last resort** — only when spouse and both parents
+   all come back with zero Strong/Possible candidates does the subject get created without any
+   relationship pending at creation time.
+
+**UI requirement — "connected" vs "unattached" must be visible before commit:** the
+match-check screen (§3.2) must show, per person, which of these applies before the user
+commits:
+
+- **Connected** — this person will be created (or attached) *and* linked to at least one
+  other confirmed/decided relative in the same commit. Show which relationship.
+- **Unattached** — this person will be created with no relationship pending yet (the
+  last-resort case above, or a person whose only relatives were all skipped). Flag this
+  visually as a heavier decision than "connected create" — it's the case most likely to
+  produce an orphaned duplicate later if the missed match turns up on a subsequent search.
+
+This is a design decision to build against, not implemented this pass — see §4.2 for the
+corresponding write-sequence amendment and the follow-up handoff note in repo-memory.md for
+what's left to build.
+
 ---
 
 ## 4. Write sequence, errors, dry-run
@@ -202,16 +276,34 @@ optional — the auth-code flow is small enough to hand-roll, decide in M2.0.
 
 ### 4.2 Sequence per upload job
 
+**Amended 2026-08-12 (FWL-012-H11)** per §3.3's search-order strategy — relatives are
+searched, decided, and created **before** the subject, and the subject is created already
+relationship-linked rather than left floating for a later step to connect:
+
 ```
-0. Auth check      — valid session? else redirect to /auth/login (§5)
-1. Match check     — reads only (§3); user decisions recorded in the journal
-2. Create persons  — subject first, then relatives (create-or-use-PID per decision)
-3. Relationships   — couple, then child-and-parents (needs PIDs from step 2)
-4. Source          — create Source Description once
-5. Attach          — source reference to every person + relationship from steps 2–3
-6. Summary screen  — table of everything written, each row linking to the
-                     person/relationship on FamilySearch beta
+0. Auth check       — valid session? else redirect to /auth/login (§5)
+1. Match check      — reads only (§3.1); relatives searched first per §3.3; user
+                      decisions recorded in the journal
+2. Create relatives — spouse and parents first (create-or-use-PID per decision),
+                      then any other relatives being written (children, siblings)
+3. Create subject   — create-or-use-PID per decision, immediately followed by the
+                      relationship POST(s) linking the subject to whichever relatives
+                      from step 2 were confirmed/created — not deferred to a later
+                      step. A subject created with zero relatives confirmed (the
+                      unattached last-resort case, §3.3) skips this linking, by
+                      definition, not by omission.
+4. Remaining        — any relationship the ordering above didn't already cover
+   relationships       (e.g. children/siblings still needing their own CPRs)
+5. Source           — create Source Description once
+6. Attach           — source reference to every person + relationship from steps 2–4
+7. Summary screen   — table of everything written, each row linking to the
+                      person/relationship on FamilySearch beta, and flagging which
+                      persons landed "connected" vs "unattached" per §3.3's UI rule
 ```
+
+The old ordering (subject-first person creation, then one relationships pass over everyone)
+is superseded by this — visible in `git log` for this file if the prior shape matters later;
+the sequence above is the one to build against.
 
 **Upload journal (idempotency):** `tmp/<uuid>.upload.json`, written before and after every
 intended call: `{step, method, url, body_digest, status, resulting_pid, ts}`. Every write step
