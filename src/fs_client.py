@@ -39,13 +39,20 @@ SOURCE_DESCRIPTIONS_PATH = "/platform/sources/descriptions"
 # best-effort and defensive, not confirmed live. Re-verify at M2.3 build time.
 MATCHES_PATH = "/platform/tree/matches"
 
-# FamilySearch's own docs require the POST body to be a GEDCOM X document whose
-# primary person carries a local `id`, referenced by a `sourceDescriptions` entry's
-# `about`. Without both, FamilySearch rejects the request outright: confirmed live
-# 2026-08-12 (FWL-012-H4) — "The gedcomx must contain a descriptionRef." This id is
-# scoped to one search_matches() request body only; it is never sent to any other
-# endpoint (person creation does not need or want it).
+# FamilySearch's own docs (Read Person Matches using Gedcomx usecase, fetched live
+# 2026-08-12) show the full required reference chain: the primary person carries a
+# local `id`; a `sourceDescriptions` entry carries its own `id` and an `about`
+# pointing at the person (`"about": "#<personId>"`); and the top-level document
+# carries a `description` pointing at that source description
+# (`"description": "#<sourceDescriptionId>"`). All three pieces are required —
+# confirmed the hard way: a first attempt at this fix (FWL-012-H5) added the
+# `sourceDescriptions`/`about` link but left out the top-level `description`, and
+# FamilySearch rejected it with the exact same error as before having any of this:
+# "The gedcomx must contain a descriptionRef." These ids are scoped to one
+# search_matches() request body only; never sent to any other endpoint (person
+# creation does not need or want them).
 MATCH_PRIMARY_PERSON_ID = "primary"
+MATCH_SOURCE_DESCRIPTION_ID = "sourceDescription"
 
 # Placeholder bucket cutoffs against FS's 1-5 confidence scale (plan §9 open
 # question 5 — "tuned empirically against beta during M2.2"). Cannot be tuned
@@ -223,8 +230,12 @@ class FamilySearchClient:
         results aren't a write and don't need idempotent resume."""
         primary = {**person_gedcomx, "id": MATCH_PRIMARY_PERSON_ID}
         body = {
+            "description": f"#{MATCH_SOURCE_DESCRIPTION_ID}",
             "persons": [primary],
-            "sourceDescriptions": [{"about": f"#{MATCH_PRIMARY_PERSON_ID}"}],
+            "sourceDescriptions": [{
+                "id": MATCH_SOURCE_DESCRIPTION_ID,
+                "about": f"#{MATCH_PRIMARY_PERSON_ID}",
+            }],
         }
         try:
             resp = self._http.post(

@@ -388,13 +388,17 @@ class TestSearchMatches:
                                      transport=httpx.MockTransport(handler))
         client.search_matches({"names": []})
 
-    def test_request_body_has_id_and_matching_source_description(self, tmp_path):
-        """FamilySearch rejects a Person Matches by Example body whose primary person
-        has no `id` and whose document has no `sourceDescriptions` entry pointing at
-        it — confirmed live 2026-08-12 (FWL-012-H4): 400 "The gedcomx must contain a
-        descriptionRef." This is the shape that fixes it. Also confirms the original
-        person dict passed in isn't mutated (the id is call-scoped, not smuggled back
-        into the plan's shared person body used elsewhere, e.g. person creation)."""
+    def test_request_body_has_full_description_ref_chain(self, tmp_path):
+        """FamilySearch rejects a Person Matches by Example body missing any link in the
+        description-ref chain: primary person `id` -> sourceDescriptions[].about -> that
+        person, AND a top-level `description` -> that sourceDescriptions[].id. Confirmed
+        live 2026-08-12 (FWL-012-H4, then FWL-012-H6 after a first fix attempt in
+        FWL-012-H5 got the about-link right but omitted the top-level `description`,
+        still failing with "The gedcomx must contain a descriptionRef." — same error,
+        because that field specifically is the "descriptionRef"). Also confirms the
+        original person dict passed in isn't mutated (these ids are call-scoped, not
+        smuggled back into the plan's shared person body used elsewhere, e.g. person
+        creation)."""
         calls = []
 
         def handler(request):
@@ -411,6 +415,13 @@ class TestSearchMatches:
         sent = json.loads(calls[0].content)
         primary = sent["persons"][0]
         assert primary["id"], "primary person must carry a non-empty id"
-        assert sent["sourceDescriptions"] == [{"about": f"#{primary['id']}"}]
+
+        source_descriptions = sent["sourceDescriptions"]
+        assert len(source_descriptions) == 1
+        sd = source_descriptions[0]
+        assert sd["id"], "sourceDescriptions entry must carry a non-empty id"
+        assert sd["about"] == f"#{primary['id']}", "sourceDescriptions.about must reference the primary person"
+
+        assert sent["description"] == f"#{sd['id']}", "top-level description must reference the sourceDescriptions id"
 
         assert client.journal == []

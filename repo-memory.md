@@ -41,6 +41,17 @@ Three-tier setup:
 - **Python:** 3.12+ in `.venv` (activate with `.venv\Scripts\activate`)
 - **Run Flask:** `python -m src.app` (binds to `0.0.0.0:8081`)
 - **Primary code-editing environment.** All commits originate here.
+- **Known gotcha (found FWL-012-H3 and again FWL-012-H6, 2026-08-11/12): Werkzeug's
+  `debug=True` reloader does not reliably release port 8081 on Windows when it restarts.**
+  Editing a `.py` file
+  while the Dev server is running can leave the *old* process still holding the socket
+  while a new one spins up alongside it — requests keep hitting stale code with no error
+  or warning, which cost real time this session (a code fix retested "still failing" against
+  code that was never actually reloaded). After any code edit while the server is running,
+  don't trust the reloader: check `netstat -ano | findstr :8081` for the actual listening
+  PID, and if in doubt, kill every `python.exe` process in the `far-west-legacy` tree
+  (`Get-CimInstance Win32_Process -Filter "Name='python.exe'"` filtered on command line) and
+  start fresh rather than assuming the reloader picked up the change.
 
 ### ~~Demo / Local — MacBook Air~~ (DEPRECATED 2026-04-26)
 - **Status:** No longer the demo platform. Production demo is at `farwestlegacy.com` (Render). Dev and tests run on the Dell.
@@ -106,14 +117,16 @@ Three-tier setup:
   - Suspected fix: tiered fetcher (plain requests → UA spoofing → headless browser, opt-in only). Architecture discussion deferred to FWL 005.
   - Owner: FWL 005.
 
-- **~~[P0] `search_matches()` sends a malformed GEDCOM X body — every real `/upload/<job_id>` match-check 400s.~~ FIXED 2026-08-12 (FWL-012-H5).**
+- **[P0] `search_matches()` sends a malformed GEDCOM X body — every real `/upload/<job_id>` match-check 400s. Corrected 2026-08-12 (FWL-012-H6), not yet confirmed live.**
   - Symptom: `/upload/<job_id>` fails immediately with "FamilySearch match search failed: HTTP 400" on the very first person checked (the deceased subject themselves — `upload_match_check()` iterates `plan["persons"]` in order and aborts on the first exception, and `map_extraction_to_plan()` always inserts `"subject"` first).
   - Reproduced live 2026-08-12 (FWL-012-H4) against Aletha Gibbons Turley's real approved record (`tmp/2876f87b-05d2-4654-921a-98e8c59b831d.json`) with a real FamilySearch beta session/token.
-  - **Confirmed root cause, not guessed** — FamilySearch's actual response body: `{"errors":[{"code":400,"label":"Bad Request","message":"The gedcomx must contain a descriptionRef."}]}`. `fs_client.py`'s `search_matches()` POSTs `{"persons": [person_gedcomx]}` to `/platform/tree/matches` (`MATCHES_PATH`). Per FamilySearch's Person Matches by Example docs (developers.familysearch.org, fetched live 2026-08-12): the POST body must be a direct GEDCOM X document whose primary person carries an `id`, with the document itself (or a `sourceDescriptions` entry) carrying a `description`/`about` reference pointing at that person's `id` (e.g. `"description": "#primaryPerson"`) so FamilySearch knows which person in the payload to match against. `fs_map.map_extraction_to_plan()`'s person bodies never set an `id`, and `search_matches()` never adds the reference — both missing pieces the docs list as required, and exactly the error text FamilySearch returned.
-  - This is precisely the gap `search_matches()`'s own module comment already flagged before tonight: "the exact response envelope shape was NOT verifiable against live docs without a working access token... best-effort and defensive, not confirmed live. Re-verify at M2.3 build time." Tonight's real token confirmed it wrong, in the specific way described above.
-  - **Fix (FWL-012-H5):** `search_matches()` now builds a call-scoped copy of the person body with `"id": MATCH_PRIMARY_PERSON_ID` (`"primary"`) added, and sends a top-level `sourceDescriptions: [{"about": "#primary"}]` alongside it. Deliberately scoped to `fs_client.py`'s request-assembly step, not `fs_map.map_extraction_to_plan()` — that function's person bodies are shared with the real write-sequence (person creation, relationships), which has no `id`/`sourceDescriptions` requirement of its own; injecting one there would have changed an already-working, untouched-tonight code path to fix a Matches-only gap. The caller's person dict is not mutated (`{**person_gedcomx, "id": ...}` builds a new dict).
-  - New offline test `tests/test_fs_client.py::TestSearchMatches::test_request_body_has_id_and_matching_source_description` asserts the outbound body carries a non-empty `id` on the primary person and a matching `sourceDescriptions[0].about`, and that the caller's original dict is untouched — this is exactly the kind of check that should have caught the gap before a live surprise; it's a mocked-transport unit test, no live call needed to verify the shape. Full suite: 200 passed, 9 skipped (up from 199).
-  - **Live retest still needed — Chief's own next step, not done this session.** The fix is built from FamilySearch's documented contract plus the live error text, but not yet re-confirmed against a real 200 from the Matches endpoint.
+  - **Confirmed root cause, not guessed** — FamilySearch's actual response body: `{"errors":[{"code":400,"label":"Bad Request","message":"The gedcomx must contain a descriptionRef."}]}`.
+  - **FWL-012-H5's first fix attempt was incomplete — flagged here as a lesson, not hidden.** It added a `sourceDescriptions` entry with `about` pointing at the primary person's new `id`, but left out the document's own top-level `description` field pointing back at that source description. Chief retested live and got the *exact same error text* — proof the first fix didn't touch the actual gap, not just an unverified guess sitting untested. (Separately, the first retest was also confused by the Dev server's Werkzeug reloader not cleanly picking up the code change on Windows — see Deployment Topology note below — so the very first "still 400" report needed a clean server restart before it was even testing FWL-012-H5's code at all. The *second* same-error retest, after a confirmed-clean restart, is what proved the fix itself was wrong, not just stale.)
+  - **Full required chain, per FamilySearch's own worked example** (`Read_Person_Matches_using_Gedcomx_usecase` doc, fetched live 2026-08-12, quoted verbatim in `cannonops-vault/Handoff-Status/FWL-012-H6.md`): the primary person needs an `id`; a `sourceDescriptions` entry needs its *own* `id` plus an `about` pointing at the person (`"about": "#<personId>"`); and the **top-level document itself needs a `description` field pointing at that source description's id** (`"description": "#<sourceDescriptionId>"`). That top-level field is literally the "descriptionRef" FamilySearch's error names — FWL-012-H5 built the middle link but never closed the loop back to the document root.
+  - **Corrected fix (FWL-012-H6):** `search_matches()` now sends `{"description": "#sourceDescription", "persons": [{...,"id":"primary"}], "sourceDescriptions": [{"id": "sourceDescription", "about": "#primary"}]}` — all three pieces present. Still scoped entirely to `fs_client.py`'s request-assembly step, `fs_map.py` untouched, same reasoning as FWL-012-H5 (the shared write-sequence person bodies have no reason to carry these fields).
+  - `tests/test_fs_client.py::TestSearchMatches::test_request_body_has_full_description_ref_chain` (renamed/expanded from FWL-012-H5's version) now asserts all three links, not just the one FWL-012-H5 got right. Full suite: 200 passed, 9 skipped.
+  - **Live retest still needed — Chief's own next step, not done this session.** Given FWL-012-H5's fix looked complete and confirmed-by-docs too, and still wasn't, this entry stays open (not struck through as fixed) until a real 200 comes back from the Matches endpoint.
+  - Full diagnostic/fix trail: `cannonops-vault/Handoff-Status/FWL-012-H4.md` (diagnosis), `FWL-012-H5.md` (first, incomplete fix), `FWL-012-H6.md` (this correction).
   - Full diagnostic + fix detail: `cannonops-vault/Handoff-Status/FWL-012-H4.md` (diagnosis) and `FWL-012-H5.md` (fix).
 
 ---
