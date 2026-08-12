@@ -566,4 +566,12 @@ def logs():
 
 if __name__ == "__main__":
     port = int(os.getenv("FLASK_PORT", 8081))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    # use_reloader=False: the app writes JSON into tmp/ and output/ (inside the watched
+    # project tree) on nearly every route — extract, approve, match-search journal,
+    # decisions file — which the Werkzeug reloader's file-watcher can pick up as a "code
+    # change" and restart on, unrelated to any actual edit. That's the likely cause of the
+    # repeated "port 8081 not listening" crashes seen 2026-08-12 (FWL-012-H10). debug=True
+    # stays on for the interactive traceback pages; only the auto-reloader is disabled —
+    # a code change now needs a manual restart, same as this session already did by hand
+    # every time regardless.
+    app.run(host="0.0.0.0", port=port, debug=True, use_reloader=False)

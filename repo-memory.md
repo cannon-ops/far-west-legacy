@@ -41,17 +41,24 @@ Three-tier setup:
 - **Python:** 3.12+ in `.venv` (activate with `.venv\Scripts\activate`)
 - **Run Flask:** `python -m src.app` (binds to `0.0.0.0:8081`)
 - **Primary code-editing environment.** All commits originate here.
-- **Known gotcha (found FWL-012-H3 and again FWL-012-H6, 2026-08-11/12): Werkzeug's
-  `debug=True` reloader does not reliably release port 8081 on Windows when it restarts.**
-  Editing a `.py` file
-  while the Dev server is running can leave the *old* process still holding the socket
-  while a new one spins up alongside it — requests keep hitting stale code with no error
-  or warning, which cost real time this session (a code fix retested "still failing" against
-  code that was never actually reloaded). After any code edit while the server is running,
-  don't trust the reloader: check `netstat -ano | findstr :8081` for the actual listening
-  PID, and if in doubt, kill every `python.exe` process in the `far-west-legacy` tree
-  (`Get-CimInstance Win32_Process -Filter "Name='python.exe'"` filtered on command line) and
-  start fresh rather than assuming the reloader picked up the change.
+- **~~Known gotcha: Werkzeug's `debug=True` reloader does not reliably release port 8081 on
+  Windows when it restarts.~~ FIXED 2026-08-12 (FWL-012-H10): reloader disabled entirely.**
+  Found FWL-012-H3 and again FWL-012-H6 (2026-08-11/12) — editing a `.py` file while the Dev
+  server was running could leave the *old* process still holding the socket while a new one
+  spun up alongside it, requests silently hitting stale code, which cost real time across
+  the session (a code fix retested "still failing" against code that was never actually
+  reloaded). Root cause identified FWL-012-H10: the app writes JSON into `tmp/`/`output/`
+  (inside the watched project tree) on nearly every route — extract, approve, match-search
+  journal, decisions file — which the reloader's file-watcher could pick up as a "code
+  change" and restart on, unrelated to any real edit; likely also behind the repeated
+  "port 8081 not listening" crashes seen throughout the night, independent of any code edit
+  at all. `src/app.py`'s `app.run()` now passes `use_reloader=False` (`debug=True` stays on
+  for the interactive traceback pages). **A code change now needs a manual restart every
+  time** — kill every `python.exe` process in the `far-west-legacy` tree
+  (`Get-CimInstance Win32_Process -Filter "Name='python.exe'"` filtered on command line,
+  since a stray venv-launcher wrapper process is normal and not itself a problem) and start
+  fresh; confirmed live that a fresh start now produces exactly one `python.exe` process,
+  not the old parent-watcher/child-server pair.
 
 ### ~~Demo / Local — MacBook Air~~ (DEPRECATED 2026-04-26)
 - **Status:** No longer the demo platform. Production demo is at `farwestlegacy.com` (Render). Dev and tests run on the Dell.
