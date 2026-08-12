@@ -388,4 +388,29 @@ class TestSearchMatches:
                                      transport=httpx.MockTransport(handler))
         client.search_matches({"names": []})
 
+    def test_request_body_has_id_and_matching_source_description(self, tmp_path):
+        """FamilySearch rejects a Person Matches by Example body whose primary person
+        has no `id` and whose document has no `sourceDescriptions` entry pointing at
+        it — confirmed live 2026-08-12 (FWL-012-H4): 400 "The gedcomx must contain a
+        descriptionRef." This is the shape that fixes it. Also confirms the original
+        person dict passed in isn't mutated (the id is call-scoped, not smuggled back
+        into the plan's shared person body used elsewhere, e.g. person creation)."""
+        calls = []
+
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(200, json={"persons": []})
+
+        client = FamilySearchClient(access_token="tok", dry_run=False, journal_path=tmp_path / "journal.json",
+                                     transport=httpx.MockTransport(handler))
+        person = {"names": [], "living": False}
+        client.search_matches(person)
+
+        assert person == {"names": [], "living": False}, "search_matches() must not mutate the caller's person dict"
+
+        sent = json.loads(calls[0].content)
+        primary = sent["persons"][0]
+        assert primary["id"], "primary person must carry a non-empty id"
+        assert sent["sourceDescriptions"] == [{"about": f"#{primary['id']}"}]
+
         assert client.journal == []

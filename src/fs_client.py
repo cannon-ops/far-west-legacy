@@ -39,6 +39,14 @@ SOURCE_DESCRIPTIONS_PATH = "/platform/sources/descriptions"
 # best-effort and defensive, not confirmed live. Re-verify at M2.3 build time.
 MATCHES_PATH = "/platform/tree/matches"
 
+# FamilySearch's own docs require the POST body to be a GEDCOM X document whose
+# primary person carries a local `id`, referenced by a `sourceDescriptions` entry's
+# `about`. Without both, FamilySearch rejects the request outright: confirmed live
+# 2026-08-12 (FWL-012-H4) — "The gedcomx must contain a descriptionRef." This id is
+# scoped to one search_matches() request body only; it is never sent to any other
+# endpoint (person creation does not need or want it).
+MATCH_PRIMARY_PERSON_ID = "primary"
+
 # Placeholder bucket cutoffs against FS's 1-5 confidence scale (plan §9 open
 # question 5 — "tuned empirically against beta during M2.2"). Cannot be tuned
 # empirically until a live token exists; these are a reasonable starting split,
@@ -213,7 +221,11 @@ class FamilySearchClient:
         """Person Matches by Example (plan §3.1) — a read, so it always executes for
         real regardless of dry_run, and (unlike send()) is not journaled: match
         results aren't a write and don't need idempotent resume."""
-        body = {"persons": [person_gedcomx]}
+        primary = {**person_gedcomx, "id": MATCH_PRIMARY_PERSON_ID}
+        body = {
+            "persons": [primary],
+            "sourceDescriptions": [{"about": f"#{MATCH_PRIMARY_PERSON_ID}"}],
+        }
         try:
             resp = self._http.post(
                 f"{MATCHES_PATH}?count={count}",
