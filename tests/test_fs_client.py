@@ -516,3 +516,121 @@ class TestSearchMatches:
         assert sent["description"] == f"#{sd['id']}", "top-level description must reference the sourceDescriptions id"
 
         assert client.journal == []
+
+
+class TestWriteSequenceOrder:
+    """FWL-013-H1: plan §4.2 reorder — spouse/parent persons are created before the
+    subject, and the subject's own couple/parent-CPR relationships are POSTed
+    immediately after its creation instead of in a separate later pass. Children/
+    siblings still come after the subject, since their relationships need its PID."""
+
+    _PLAN = {
+        "persons": {
+            "subject": {"names": []},
+            "spouse_0": {"names": []},
+            "parent_0": {"names": []},
+            "parent_1": {"names": []},
+            "child_0": {"names": []},
+        },
+        "relationships": {
+            "couples": [{"person1": "subject", "person2": "spouse_0"}],
+            "child_and_parents": [
+                {"child": "subject", "parent1": "parent_0", "parent2": "parent_1"},
+                {"child": "child_0", "parent1": "subject", "parent2": None},
+            ],
+        },
+    }
+
+    def _client(self, tmp_path):
+        counter = {"n": 0}
+
+        def handler(request):
+            counter["n"] += 1
+            return httpx.Response(201, headers={"Location": f"https://apibeta.familysearch.org/x/PID-{counter['n']}"})
+
+        return FamilySearchClient(access_token="tok", dry_run=False, journal_path=tmp_path / "journal.json",
+                                   transport=httpx.MockTransport(handler))
+
+    def test_spouse_and_parents_created_before_subject(self, tmp_path):
+        client = self._client(tmp_path)
+        run_upload_sequence(client, self._PLAN)
+
+        person_steps = [e["step"] for e in client.journal if e["step"].startswith("person:")]
+        assert person_steps.index("person:spouse_0") < person_steps.index("person:subject")
+        assert person_steps.index("person:parent_0") < person_steps.index("person:subject")
+        assert person_steps.index("person:parent_1") < person_steps.index("person:subject")
+        assert person_steps.index("person:child_0") > person_steps.index("person:subject")
+
+    def test_subjects_relationships_immediately_follow_its_creation(self, tmp_path):
+        client = self._client(tmp_path)
+        run_upload_sequence(client, self._PLAN)
+
+        steps = [e["step"] for e in client.journal]
+        subject_idx = steps.index("person:subject")
+        # The couple and the subject's own parent-CPR come right after — not deferred
+        # until after child_0 (the other relative) is also created.
+        assert steps[subject_idx + 1] == "couple:0"
+        assert steps[subject_idx + 2] == "cpr:0"
+        assert "person:child_0" not in steps[: subject_idx + 3]
+
+    def test_result_pids_are_still_correct_regardless_of_order(self, tmp_path):
+        client = self._client(tmp_path)
+        result = run_upload_sequence(client, self._PLAN)
+        assert set(result["persons"].keys()) == {"subject", "spouse_0", "parent_0", "parent_1", "child_0"}
+        assert len(result["couples"]) == 1
+        assert len(result["child_and_parents"]) == 2
+
+
+class TestPostCreateRelativeFallback:
+    """FWL-013-H1: plan §4.2 step 4 / §3.4, degraded near-term form — Record Hinting
+    Certification isn't granted yet, so this re-runs the same thin parent/spouse search
+    §3.3 step 3 already ran, flagged so a caller never presents it as a real record-hint
+    result. Deliberately not called from run_upload_sequence() — see the method's own
+    docstring for why."""
+
+    def test_only_searches_spouse_and_parent_roles(self, tmp_path):
+        bodies_seen = []
+
+        def handler(request):
+            bodies_seen.append(json.loads(request.content))
+            return httpx.Response(204)
+
+        client = FamilySearchClient(access_token="tok", dry_run=True, journal_path=tmp_path / "journal.json",
+                                     transport=httpx.MockTransport(handler))
+        plan = {"persons": {
+            "subject": {"names": []}, "spouse_0": {"names": []},
+            "parent_0": {"names": []}, "child_0": {"names": []}, "sibling_0": {"names": []},
+        }}
+        results = client.post_create_relative_fallback(plan)
+
+        assert {r["key"] for r in results} == {"spouse_0", "parent_0"}
+        assert all(r["record_hint_status"] == "not_certified" for r in results)
+        assert len(bodies_seen) == 2
+
+    def test_is_a_live_read_even_under_dry_run(self, tmp_path):
+        """Same rule as search_matches(): a read, so dry_run never short-circuits it."""
+        calls = []
+
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(204)
+
+        client = FamilySearchClient(access_token="tok", dry_run=True, journal_path=tmp_path / "journal.json",
+                                     transport=httpx.MockTransport(handler))
+        client.post_create_relative_fallback({"persons": {"subject": {"names": []}, "parent_0": {"names": []}}})
+
+        assert len(calls) == 1
+
+    def test_no_spouse_or_parent_in_plan_makes_no_calls(self, tmp_path):
+        calls = []
+
+        def handler(request):
+            calls.append(request)
+            return httpx.Response(204)
+
+        client = FamilySearchClient(access_token="tok", dry_run=True, journal_path=tmp_path / "journal.json",
+                                     transport=httpx.MockTransport(handler))
+        results = client.post_create_relative_fallback({"persons": {"subject": {"names": []}, "child_0": {"names": []}}})
+
+        assert results == []
+        assert calls == []

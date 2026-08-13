@@ -89,4 +89,6 @@ def test_neese_dry_run_resumes_without_duplicate_creates(tmp_path):
     summary2 = run_upload_sequence(client2, plan)
 
     assert len(client2.journal) == first_len  # nothing re-created
-    assert summary2["persons"]["subject"] == "DRYRUN-P001"
+    # DRYRUN-P003, not P001: plan §4.2 (FWL-013-H1) creates parent_0/parent_1 before the
+    # subject, so the subject is the third person created, not the first.
+    assert summary2["persons"]["subject"] == "DRYRUN-P003"

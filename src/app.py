@@ -466,15 +466,58 @@ def upload_match_check(job_id: str):
     )
     persons = []
     try:
+        # Subject-first search (plan §3.3, FWL-012-H12, implemented FWL-013-H1): the
+        # subject carries the richest extracted data (full birth/death dates+places) and
+        # is searched first, on its own, before any relative. Its outcome then gates the
+        # parent/spouse fallback search below.
+        subject_body = plan["persons"]["subject"]
+        subject_label = _plan_person_label("subject", data)
+        subject_candidates = client.search_matches(subject_body)
+        subject_found = any(c["bucket"] in ("strong", "possible") for c in subject_candidates)
+        persons.append({
+            "key": "subject",
+            "name": subject_label["name"],
+            "lifespan": subject_label["lifespan"],
+            "candidates": subject_candidates,
+            "has_strong_or_possible": subject_found,
+            "search_note": None,
+        })
+
         for key, person_body in plan["persons"].items():
+            if key == "subject":
+                continue
             label = _plan_person_label(key, data)
-            candidates = client.search_matches(person_body)
+            role = key.split("_", 1)[0]
+
+            # §3.3 step 3: parents/spouse are searched directly only as the fallback for
+            # a subject that wasn't found — a matched relative then gives the subject a
+            # real attachment point. When the subject WAS found, that fallback's own
+            # reason (give the subject somewhere to attach) doesn't apply; §3.3 step 2's
+            # anchor mechanism for resolving these relatives is record hints (§3.4),
+            # which aren't certified yet, so no live search runs here either — the
+            # degraded state is surfaced to the user via search_note rather than silently
+            # skipped. Children/siblings are never part of this anchor logic (they never
+            # anchor the subject — the subject anchors *them*), so they're always
+            # searched directly, same as before.
+            if role in ("spouse", "parent") and subject_found:
+                candidates = []
+                search_note = (
+                    "Subject already matched — not searched directly. Resolving this "
+                    "relative from the subject's confirmed record is what FamilySearch "
+                    "Record Hinting is for, but that capability isn't certified for this "
+                    "app yet (plan §3.4). Search FamilySearch.org directly if needed."
+                )
+            else:
+                candidates = client.search_matches(person_body)
+                search_note = None
+
             persons.append({
                 "key": key,
                 "name": label["name"],
                 "lifespan": label["lifespan"],
                 "candidates": candidates,
                 "has_strong_or_possible": any(c["bucket"] in ("strong", "possible") for c in candidates),
+                "search_note": search_note,
             })
     except FSAuthExpiredError:
         return redirect(url_for("auth_login"))

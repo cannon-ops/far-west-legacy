@@ -73,6 +73,8 @@
           <span></span>
         </div>
         {% endfor %}
+      {% elif person.search_note %}
+        <p class="no-matches">{{ person.search_note }}</p>
       {% else %}
         <p class="no-matches">No candidate matches found.</p>
       {% endif %}

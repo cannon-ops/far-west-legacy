@@ -34,11 +34,40 @@ class FakeMatchClient:
         pass
 
 
+class CountingMatchClient:
+    """Counts search_matches() calls — the route always searches the subject first
+    (FWL-013-H1), so the first call is always the subject; SUBJECT_FOUND controls
+    whether that first call reports a strong match. Used to verify parent/spouse are
+    only searched directly (§3.3 step 3's fallback) when the subject wasn't found."""
+
+    SUBJECT_FOUND = True
+    call_count = 0
+
+    def __init__(self, *args, **kwargs):
+        pass
+
+    def search_matches(self, person_body, count=5):
+        CountingMatchClient.call_count += 1
+        if CountingMatchClient.call_count == 1:
+            if CountingMatchClient.SUBJECT_FOUND:
+                return [{"pid": "PID-SUBJECT", "name": "Subject Match", "lifespan": "1939-2024",
+                         "confidence": 5, "bucket": "strong"}]
+            return []
+        return []
+
+    def close(self):
+        pass
+
+
 @pytest.fixture(autouse=True)
 def _reset_fake_client():
     FakeMatchClient.STRONG_MATCH = True
+    CountingMatchClient.SUBJECT_FOUND = True
+    CountingMatchClient.call_count = 0
     yield
     FakeMatchClient.STRONG_MATCH = True
+    CountingMatchClient.SUBJECT_FOUND = True
+    CountingMatchClient.call_count = 0
 
 
 @pytest.fixture
@@ -107,6 +136,47 @@ class TestUploadMatchCheck:
 
         assert resp.status_code == 200
         assert "No candidate matches found." in resp.get_data(as_text=True)
+
+
+class TestSubjectFirstSearchGating:
+    """FWL-013-H1 (plan §3.3, FWL-012-H12): the subject is searched first, and parents/
+    spouse are only searched directly as the fallback for a subject that wasn't found.
+    Neese fixture: subject + 2 parents + 4 siblings, no spouse — siblings are never part
+    of this gating and are always searched, so they're the control."""
+
+    @pytest.fixture
+    def counting_client(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(app_module, "TMP_DIR", tmp_path)
+        monkeypatch.setattr(app_module, "FWL_FS_UPLOAD_ENABLED", True)
+        monkeypatch.setattr(app_module, "FamilySearchClient", CountingMatchClient)
+        monkeypatch.setattr(
+            app_module.fs_auth, "get_session",
+            lambda sid: {"token": {"access_token": "fake-tok"}, "display_name": "Joel Cannon"} if sid == "test-sid" else None,
+        )
+        app_module.app.config["TESTING"] = True
+        return app_module.app.test_client()
+
+    def test_parents_not_searched_when_subject_found(self, counting_client, tmp_path):
+        CountingMatchClient.SUBJECT_FOUND = True
+        _seed_job(tmp_path)
+        _signed_in(counting_client)
+        resp = counting_client.get("/upload/job-1")
+
+        assert resp.status_code == 200
+        # subject (1) + 4 siblings (always searched) = 5; parent_0/parent_1 skipped
+        assert CountingMatchClient.call_count == 5
+        body = resp.get_data(as_text=True)
+        assert "record hint" in body.lower() or "Record Hinting" in body
+
+    def test_parents_searched_when_subject_not_found(self, counting_client, tmp_path):
+        CountingMatchClient.SUBJECT_FOUND = False
+        _seed_job(tmp_path)
+        _signed_in(counting_client)
+        resp = counting_client.get("/upload/job-1")
+
+        assert resp.status_code == 200
+        # subject (1) + 2 parents (fallback triggered) + 4 siblings = 7
+        assert CountingMatchClient.call_count == 7
 
 
 class TestUploadDecide:

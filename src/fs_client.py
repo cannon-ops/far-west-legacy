@@ -328,6 +328,46 @@ class FamilySearchClient:
 
         return _parse_match_candidates(payload)
 
+    def post_create_relative_fallback(self, plan: dict) -> list[dict]:
+        """Plan §4.2 step 4 / §3.4, degraded near-term form. The long-term mechanism for
+        finding a newly-created subject's parents/spouse/household is Record Hinting
+        (birth/marriage/census matches against the new subject PID) — not available until
+        FamilySearch grants Record Hinting Certification (requested 2026-08-12, gated on
+        Solutions Provider acceptance). Until then, this re-runs the same §3.3 step 3
+        parent/spouse Matches-by-Example search the match-check screen already ran, using
+        the identical thin (name-only) request bodies. It genuinely finds nothing new —
+        Matches by Example still has no way to accept a real PID as search context
+        (confirmed FWL-012-H11, carried forward at plan §3.3) — its purpose is to keep this
+        step visibly attempted rather than silently skipped, per §3.4's explicit
+        instruction not to omit the row. Every entry is flagged `record_hint_status:
+        "not_certified"` so a caller can render the same message search_note shows on the
+        match-check screen instead of presenting this as if it were a real record-hint
+        result.
+
+        A read, like search_matches() — always live, not journaled, dry_run has no effect
+        on it. **Not called automatically by run_upload_sequence()/_run_upload_sequence()
+        (FWL-013-H1 decision, see repo-memory.md):** that function is exercised by fully
+        offline tests with no transport mock (the dry-run golden test), and a search here
+        would dial FamilySearch for real regardless of dry_run, same as search_matches()
+        always does. It also has no way yet to know whether the subject was actually
+        newly created this run or attached to an existing match — decisions aren't
+        threaded into the plan until M2.3 builds that — so calling this unconditionally
+        from inside the sequence would search even when the subject was already found and
+        attached, which the plan does not call for. Intended caller: the M2.3 write route,
+        once built, right after a real (non-dry-run, non-resumed) subject creation.
+        """
+        results = []
+        for key, person_body in plan["persons"].items():
+            role = key.split("_", 1)[0]
+            if role not in ("spouse", "parent"):
+                continue
+            results.append({
+                "key": key,
+                "candidates": self.search_matches(person_body),
+                "record_hint_status": "not_certified",
+            })
+        return results
+
     def _send_live(self, step: str, method: str, url: str, body: dict | None, digest: str) -> str | None:
         # Intent before outcome: if the process dies between here and _settle, the journal
         # shows in_flight and the next run halts instead of creating a duplicate person.
@@ -414,28 +454,60 @@ def run_upload_sequence(client: FamilySearchClient, plan: dict,
 
 
 def _run_upload_sequence(client: FamilySearchClient, plan: dict) -> dict:
+    """Order per plan §4.2 (amended FWL-013-H1, implementing the FWL-012-H12 subject-first
+    strategy): spouse/parent persons are created (or, once §3.3 step 2/3's match-check
+    already resolved them to a real PID, attached) *before* the subject, because they're
+    the ones a not-found-subject's fallback search (§3.3 step 3) may already have anchored.
+    The subject is created next, and its own couple/parent-CPR relationships are POSTed
+    immediately after — not deferred to a separate later pass — so a confirmed relative
+    never sits linked to nothing while the subject exists floating. Children/siblings (and
+    their CPRs) still follow the subject, since those relationships need the subject's own
+    PID to exist first."""
+    persons = plan["persons"]
+    couples = plan["relationships"]["couples"]
+    cprs = plan["relationships"]["child_and_parents"]
     pids: dict[str, str] = {}
-    for key, person_body in plan["persons"].items():
-        pids[key] = client.send(f"person:{key}", "POST", f"{API_HOST}{PERSONS_PATH}", person_body)
 
-    couple_pids = []
-    for i, couple in enumerate(plan["relationships"]["couples"]):
+    def _create_person(key: str) -> str | None:
+        pid = client.send(f"person:{key}", "POST", f"{API_HOST}{PERSONS_PATH}", persons[key])
+        pids[key] = pid
+        return pid
+
+    def _create_couple(i: int, couple: dict) -> str | None:
         body = {"relationships": [{
             "type": "http://gedcomx.org/Couple",
             "person1": _person_ref(pids[couple["person1"]]),
             "person2": _person_ref(pids[couple["person2"]]),
         }]}
-        couple_pids.append(client.send(f"couple:{i}", "POST", f"{API_HOST}{COUPLE_RELATIONSHIPS_PATH}", body))
+        return client.send(f"couple:{i}", "POST", f"{API_HOST}{COUPLE_RELATIONSHIPS_PATH}", body)
 
-    cpr_pids = []
-    for i, cpr in enumerate(plan["relationships"]["child_and_parents"]):
+    def _create_cpr(i: int, cpr: dict) -> str | None:
         relationship = {"child": _person_ref(pids[cpr["child"]])}
         if cpr.get("parent1"):
             relationship["parent1"] = _person_ref(pids[cpr["parent1"]])
         if cpr.get("parent2"):
             relationship["parent2"] = _person_ref(pids[cpr["parent2"]])
         body = {"childAndParentsRelationships": [relationship]}
-        cpr_pids.append(client.send(f"cpr:{i}", "POST", f"{API_HOST}{CHILD_AND_PARENTS_RELATIONSHIPS_PATH}", body))
+        return client.send(f"cpr:{i}", "POST", f"{API_HOST}{CHILD_AND_PARENTS_RELATIONSHIPS_PATH}", body)
+
+    for key in persons:
+        if key.startswith("spouse_") or key.startswith("parent_"):
+            _create_person(key)
+
+    _create_person("subject")
+
+    couple_pids = [_create_couple(i, couple) for i, couple in enumerate(couples)]
+
+    subject_cpr_indices = [i for i, cpr in enumerate(cprs) if cpr["child"] == "subject"]
+    cpr_pids = [_create_cpr(i, cprs[i]) for i in subject_cpr_indices]
+
+    # Children/siblings need the subject (or, for siblings, the parent CPR already made
+    # above) to exist first, so their persons and CPRs both come after it.
+    for key in persons:
+        if key.startswith("child_") or key.startswith("sibling_"):
+            _create_person(key)
+
+    cpr_pids += [_create_cpr(i, cprs[i]) for i in range(len(cprs)) if i not in subject_cpr_indices]
 
     source_pid = None
     if plan.get("source"):

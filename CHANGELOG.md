@@ -5,6 +5,50 @@ Format: session number, date, milestone label, summary of changes.
 
 ---
 
+## Session 013-H1 (2026-08-13) — Subject-First Search + Write-Sequence Reorder
+
+Implements the FWL-012-H12 plan decision (`planning/familysearch-upload-plan.md` §3.3/§4.2)
+in code for the first time — H11/H12 were recon and plan-doc updates only.
+
+- **`src/app.py` `upload_match_check()`** — the subject is now searched first, on its own,
+  before any relative. Parents/spouse are only searched directly (§3.3 step 3's fallback)
+  when the subject comes back with no strong/possible match; when the subject IS found,
+  their direct search is skipped and the match-check screen shows a `search_note`
+  explaining why (record hint resolution is the intended mechanism, not certified yet —
+  §3.4) instead of silently showing nothing. Children/siblings are never part of this
+  gating and are always searched, as before.
+- **`src/fs_client.py` `_run_upload_sequence()`** — reordered per plan §4.2: spouse/parent
+  persons are created before the subject (they're the ones a not-found-subject's fallback
+  search may already have resolved), and the subject's own couple/parent-CPR relationships
+  are POSTed immediately after its creation rather than deferred to the separate
+  relationships pass every other relationship still uses. Children/siblings (and their
+  CPRs) still come after the subject, since those relationships need its PID.
+- **`FamilySearchClient.post_create_relative_fallback()` (new)** — the degraded near-term
+  form of plan §4.2 step 4 / §3.4: re-runs the same thin parent/spouse search once a
+  subject PID exists, flagged `record_hint_status: "not_certified"` so a caller never
+  presents it as a real record-hint result. **Deliberately not called from
+  `run_upload_sequence()`** — that function is exercised by a fully offline dry-run golden
+  test with no transport mock, and this (like `search_matches()`) is a live read regardless
+  of `dry_run`; it also has no way yet to know whether the subject was newly created or
+  attached this run, since decisions aren't threaded into the plan until M2.3. Built and
+  tested as a standalone unit for M2.3's write route to call once that exists.
+- **`run_upload_sequence()`/`_run_upload_sequence()` remain unwired to any route** —
+  explicit decision, not an oversight: M2.3 (live writes) hasn't started, the decide route
+  still only records decisions, and wiring a write-executing route today would bypass the
+  still-unbuilt safety/UX work M2.3 is scoped to build (progress display, confirm-before-
+  commit, resume UI). This session's reorder is prep work for that milestone.
+- **Tests:** 212 passed, 9 skipped (up from 204+9) — 8 new: 3 covering write-sequence
+  order, 3 covering `post_create_relative_fallback()`, 2 covering the subject-first search
+  gating. `test_neese_dry_run_resumes_without_duplicate_creates` updated: the subject is
+  now the third person created (`DRYRUN-P003`), not the first, since Neese's two parents
+  are created before it.
+- **Live-tested:** dev server started and confirmed listening (single `python.exe`
+  process). Real OAuth sign-in requires a human with real FamilySearch credentials in a
+  real browser (established FWL-010-H2) — an agent session cannot complete it, so
+  `/upload/<job_id>` was confirmed to correctly redirect to `/auth/login` when
+  unauthenticated against the live server, but the actual candidate-rendering re-check is
+  handed back to Chief. URL + job ID for that check: `http://localhost:8081/upload/2876f87b-05d2-4654-921a-98e8c59b831d`.
+
 ## Session 012-H1 (2026-08-11) — Unified Search: Source Registry Replaces Per-Source Panels
 
 Tier 2 of the Obituary Discovery Roadmap (`cannonops-vault/Projects/FWL/Obituary-Discovery-Roadmap.md`,
