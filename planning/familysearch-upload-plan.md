@@ -187,75 +187,100 @@ exists:
 The commit button stays disabled until every person has a decision. This is the human-confirm
 gate; there is no code path from extraction to a write that bypasses this screen.
 
-### 3.3 Search-order strategy — family context sharpens the common case
+### 3.3 Tree-connection strategy — subject-first search, record hints for attachment
 
-**Decision, 2026-08-12 (FWL-012-H11).** Chief's directed strategy, confirmed against
-FamilySearch's actual docs (`developers.familysearch.org`, same source H4-H9 verified live
-against) rather than assumed:
+**Decision, 2026-08-12 (FWL-012-H12). This supersedes an earlier relatives-first framing
+(FWL-012-H11) after two further rounds of correction from Chief — treat this section as the
+authoritative strategy, not a patch on top of the prior one.** FWL-012-H11 proposed searching
+spouse/parents *before* the subject, reasoning that a fresh obituary's subject is usually new
+to the tree while relatives are more likely already in it. Chief's correction: that assumption
+doesn't hold in general — don't assume freshness. An obituary can be for a subject from any
+era, and the subject carries the richest, most specific data FWL ever has (full birth/death
+dates and places from the obituary itself), which makes them the strongest match target
+regardless of whether the record is fresh or historical. Relatives, by contrast, currently
+have only name + living-flag data extracted from the obituary — thin, and a weaker basis for a
+confident search.
 
-**The problem this fixes:** §3.1 as originally written searches the subject first, in
-isolation. That's backwards for the common case — a fresh obituary's subject is almost always
-new to the tree, but their spouse and parents are frequently already in it. Searching the
-subject alone wastes the one piece of leverage most likely to actually resolve a common name.
+**The strategy, in order:**
 
-**What FamilySearch's Person Matches by Example actually supports — confirmed, not guessed:**
+1. **Search the subject first**, using their full extracted data (name, birth/death
+   dates+places). This is the primary and most confident search, not a fallback.
+2. **If the subject is found**, use that confirmed match as an anchor to help resolve
+   relatives (spouse, parents) — whose thin name-only data makes them hard to search
+   confidently on their own, but easier once you know which tree person they're attached to
+   (per §3.4 below, this "anchor" help is name/context enrichment via record hints once that
+   capability exists — see §3.4 — not a search-time PID link, since Matches by Example has no
+   mechanism to reference an existing real person by PID; every person in that request is
+   fresh, hypothetical fact data, confirmed via FamilySearch's own docs at FWL-012-H11's recon
+   pass and still true here).
+3. **If the subject is NOT found**, fall back to searching parents/spouse directly with
+   whatever thin data exists for them. A matched relative still gives a real attachment point
+   for the subject even when the subject himself isn't independently findable.
+4. **If the subject genuinely isn't in the tree, create them — then don't stop there.**
+   Immediately pursue record hints (birth, marriage, census, death collections) against the new
+   Tree PID to find and attach parents, spouse, and household members, who are very often
+   already in the tree even when the subject wasn't. This is the **primary** mechanism for
+   connecting a newly-created person, not an afterthought — and it matters most for **young
+   decedents specifically**: they'll rarely have their own adult-life record trail (no
+   marriage record, no census as head of household), but a birth record names their parents
+   directly, and a childhood census appearance names the whole household in one hit.
+5. **Unattached profile creation is the true last resort** — not the default outcome of a
+   failed subject search, but the outcome only after subject search, relative fallback search,
+   *and* post-create record-hint pursuit have all been tried.
 
-- **Including family members in the same submission measurably improves match accuracy — this
-  is documented, not assumed.** FamilySearch's own docs: *"For more accurate results, the
-  GEDCOM X POST body may (and should whenever possible) contain the main person's parents,
-  spouses, and children."* The matching algorithm considers "all the information given about
-  the person (and the person's parents, children and spouses, if included)."
-- **The family members must be connected to the primary person by a `relationships` entry in
-  the same document, or they're ignored.** Documented directly: *"Persons not specified in a
-  relationship (other than the primary person) will be ignored when matching."* A bare list of
-  extra `persons[]` with no `ParentChild`/`Couple` relationship linking them to the primary
-  does nothing — confirmed via the real worked example (`Read_Person_Matches_using_Gedcomx_usecase`,
-  already quoted in `cannonops-vault/Handoff-Status/FWL-012-H6.md`), which always pairs its
-  extra persons with relationship entries.
-- **Any person in the submitted family group can be the "primary" being matched** — there's
-  nothing that restricts the primary to the obituary's subject. A spouse or parent can be
-  designated primary (via the `sourceDescriptions.about` reference, same mechanism FWL-012-H6
-  already built) with the subject and other relatives included as context persons instead.
-- **What is NOT supported — checked explicitly, not silently assumed absent:** there is no
-  mechanism to reference an *already-confirmed, real* FamilySearch person by persistent ID
-  within a Matches-by-Example submission. Every person in the request body — primary or
-  context — is fresh, hypothetical fact data (a local document `id` like `"father1"`, not a
-  real PID/URL). So a relative confirmed by one search cannot be "plugged in" as a hard anchor
-  for a later search call the way Chief's step 2 first framed it. The equivalent that *is*
-  supported: re-submit that relative's known **facts** (name/dates/places, not their real PID)
-  as a context person in the subject's own search — which the docs confirm does help, just
-  without a database-level guarantee that it's the same tree record.
+**Superseded, explicitly:** FWL-012-H11's "search relatives first, use a confirmed relative's
+facts as context for the subject's search" ordering is dropped, not kept as a parallel option.
+The confirmed FamilySearch API findings from that pass (family-context-in-one-submission
+improves accuracy when relationship-linked; no PID-anchoring mechanism in Matches by Example;
+any person can be the submission's primary) remain factually true and are reused above where
+relevant — only the *ordering decision* built on top of them has changed.
 
-**The actual implementable sequence, given the above:**
+### 3.4 Record Hinting — the mechanism behind step 4, confirmed certification-gated
 
-1. **Search spouse and parents first**, each as their own primary-person search, before
-   searching the subject — using whatever facts the obituary already gave for them. Include
-   the *other* known relatives (subject, siblings, etc.) as context persons + relationships in
-   each of these calls too, since that's free accuracy per the docs above.
-2. **Use confirmed relatives' facts as context for the subject's search** (and vice versa — a
-   strong subject match's facts can be added as context for a weak relative's re-search). This
-   is a facts-based accuracy boost, not a PID-anchored guarantee — state that plainly in the
-   UI copy so "confirmed" doesn't imply more certainty than the mechanism actually provides.
-3. **The real, hard linking happens at write time, not search time** (see §4.2 amendment
-   below) — once a relative is confirmed (human picks "Use existing" with a real PID, or the
-   sequence creates them fresh), the subject is created and immediately relationship-linked to
-   that real PID via the standard Couple/Child-and-Parents relationship POST (already the
-   mechanism `_run_upload_sequence()` uses for real PIDs elsewhere — not a new capability to
-   build, just a reordering of when it runs relative to person-creation).
-4. **Unattached subject creation is the true last resort** — only when spouse and both parents
-   all come back with zero Strong/Possible candidates does the subject get created without any
-   relationship pending at creation time.
+**Not available yet, and not a near-term buildable item — documented here as a known future
+capability with a real prerequisite, not something to design code against today.**
 
-**UI requirement — "connected" vs "unattached" must be visible before commit:** the
+Confirmed independently against FamilySearch's live developer docs (`developers.familysearch.org`,
+same discipline as every other capability claim this project has made — not taken on Chief's
+word alone, though it matches what he'd already been told by Gordon):
+
+- Record Hinting is a real, documented FamilySearch API capability: given a Tree PID, the
+  `Match by Tree Person Id` resource returns a summary of possible historical-record matches
+  (persona name, collection title, record ID, match score/confidence, and accept/reject/pending
+  status) for that person.
+- **It requires a separate certification** — "Record Hinting Certification" — beyond standard
+  API access. FamilySearch's own docs: *"Use of the collection query parameter in a production
+  environment is restricted to applications that have been certified... applications requesting
+  record matches must be certified, per the Record Hinting Certification."*
+- The certification exists for a real legal reason, not an arbitrary gate: *"Due to legal
+  restrictions, Historical Records Data can only be displayed to users by FamilySearch products
+  and services"* — a certified app may show the match title/collection/confidence and must
+  redirect the user to FamilySearch.org itself to actually view/attach the record (the same
+  "detail opens on FamilySearch.org" pattern already followed elsewhere in this app for search
+  results, per the API-terms rule in `CLAUDE.md`).
+- **Requested from Gordon Clarke 2026-08-12, gated behind Solutions Provider acceptance
+  completing first** (see `cannonops-vault/Projects/FWL/FamilySearch-Solutions-Provider-Application.md`
+  for that application's own status). Record hinting cannot be requested/granted before that
+  completes.
+
+**Practical consequence for the plan:** step 4 above (post-create record-hint pursuit) is the
+long-term design target, not something buildable in the next implementation pass. Until Record
+Hinting Certification is granted, step 4 degrades to: create the subject, then fall back to the
+same Matches-by-Example relative search from step 3 (now anchored by knowing the subject's real
+PID exists, even without record-hint-driven discovery) — record it in the UI as "record-hint
+discovery not yet available" rather than silently omitting the step.
+
+**UI requirement — "connected" vs "unattached" must be visible before commit,** unchanged from
+the intent of the superseded FWL-012-H11 framing, just now driven by this ordering: the
 match-check screen (§3.2) must show, per person, which of these applies before the user
 commits:
 
 - **Connected** — this person will be created (or attached) *and* linked to at least one
   other confirmed/decided relative in the same commit. Show which relationship.
-- **Unattached** — this person will be created with no relationship pending yet (the
-  last-resort case above, or a person whose only relatives were all skipped). Flag this
-  visually as a heavier decision than "connected create" — it's the case most likely to
-  produce an orphaned duplicate later if the missed match turns up on a subsequent search.
+- **Unattached** — this person will be created with no relationship pending yet (the true
+  last-resort case above). Flag this visually as a heavier decision than "connected create" —
+  it's the case most likely to produce an orphaned duplicate later if a missed match (via
+  direct search now, or via record hints once certified) turns up subsequently.
 
 This is a design decision to build against, not implemented this pass — see §4.2 for the
 corresponding write-sequence amendment and the follow-up handoff note in repo-memory.md for
@@ -276,33 +301,47 @@ optional — the auth-code flow is small enough to hand-roll, decide in M2.0.
 
 ### 4.2 Sequence per upload job
 
-**Amended 2026-08-12 (FWL-012-H11)** per §3.3's search-order strategy — relatives are
-searched, decided, and created **before** the subject, and the subject is created already
-relationship-linked rather than left floating for a later step to connect:
+**Amended 2026-08-12 (FWL-012-H12), superseding the FWL-012-H11 amendment below it in
+`git log`.** Per §3.3/§3.4's corrected strategy: the subject is searched and created **first**
+(richest data, strongest match target), relatives are searched directly only as a fallback
+when the subject isn't found, and post-create record-hint pursuit is the long-term primary
+attachment mechanism once Record Hinting Certification exists — degrading, until then, to an
+immediate post-create relative search instead of silently doing nothing:
 
 ```
-0. Auth check       — valid session? else redirect to /auth/login (§5)
-1. Match check      — reads only (§3.1); relatives searched first per §3.3; user
-                      decisions recorded in the journal
-2. Create relatives — spouse and parents first (create-or-use-PID per decision),
-                      then any other relatives being written (children, siblings)
-3. Create subject   — create-or-use-PID per decision, immediately followed by the
-                      relationship POST(s) linking the subject to whichever relatives
-                      from step 2 were confirmed/created — not deferred to a later
-                      step. A subject created with zero relatives confirmed (the
-                      unattached last-resort case, §3.3) skips this linking, by
-                      definition, not by omission.
-4. Remaining        — any relationship the ordering above didn't already cover
-   relationships       (e.g. children/siblings still needing their own CPRs)
-5. Source           — create Source Description once
-6. Attach           — source reference to every person + relationship from steps 2–4
-7. Summary screen   — table of everything written, each row linking to the
-                      person/relationship on FamilySearch beta, and flagging which
-                      persons landed "connected" vs "unattached" per §3.3's UI rule
+0. Auth check        — valid session? else redirect to /auth/login (§5)
+1. Match check        — reads only (§3.1); subject searched first per §3.3 step 1; user
+                        decisions recorded in the journal
+2. Subject found?
+   → yes: attach       — subject uses the confirmed real PID, no create needed
+   → no:  relative      — fall back to searching parents/spouse directly with their
+          fallback       thin (name + living-flag) data per §3.3 step 3; any relative
+          search         match found becomes an attachment point for the subject
+3. Create subject     — create-or-use-PID per decision from steps 1-2, immediately
+                        followed by the relationship POST(s) linking the subject to
+                        whichever relative(s) were confirmed via step 2's fallback —
+                        not deferred to a later step, so a confirmed relative never
+                        sits unused while the subject is created floating.
+4. Post-create        — LONG-TERM (record-hint certified): pursue birth/marriage/
+   attachment            census/death record hints against the new subject PID per
+                        §3.4 step 4, to find and attach parents/spouse/household who
+                        weren't found in step 2's direct search. NEAR-TERM (until
+                        certified, per §3.4): re-run the step-2 relative search now
+                        that the subject has a real PID, rather than silently skipping
+                        this step — record in the UI that record-hint discovery isn't
+                        available yet, don't just omit the row.
+5. Remaining          — any relationship the ordering above didn't already cover
+   relationships         (e.g. children/siblings still needing their own CPRs)
+6. Source             — create Source Description once
+7. Attach             — source reference to every person + relationship from steps 2–5
+8. Summary screen     — table of everything written, each row linking to the
+                        person/relationship on FamilySearch beta, and flagging which
+                        persons landed "connected" vs "unattached" per §3.3/§3.4's UI rule
 ```
 
-The old ordering (subject-first person creation, then one relationships pass over everyone)
-is superseded by this — visible in `git log` for this file if the prior shape matters later;
+**Superseded orderings, kept traceable in `git log` for this file rather than deleted
+silently:** the original subject-first-with-one-later-relationships-pass shape, and the
+FWL-012-H11 relatives-searched-and-created-before-subject shape. Both are gone from this doc;
 the sequence above is the one to build against.
 
 **Upload journal (idempotency):** `tmp/<uuid>.upload.json`, written before and after every
