@@ -179,6 +179,25 @@ For multi-step tasks, state a brief plan with verification per step. Strong succ
 5. Surface all errors immediately. Never silently swallow exceptions.
 6. Wally (Claude Chat) handles planning/architecture. Agent 13 (Claude Code) handles execution only.
 
+## Vault access — reads vs. writes (COO-022-H8, 2026-09-04)
+
+`cannonops-vault` has a dedicated worktree for this project,
+`C:\Users\joelc\Projects\cannonops-vault-fwl` (branch `worktree/fwl`), built
+to stop concurrent FWL/Sykes/COO sessions from colliding in the shared
+checkout (COO-017-H3, 2026-08-12/13).
+
+- **Reads stay against the plain shared checkout**
+  (`C:\Users\joelc\Projects\cannonops-vault`) — it's the freshest copy, and
+  reading it carries no collision risk. This includes the handoff-ledger
+  sweep referenced above and anything else that only looks at vault state.
+- **Writes from an FWL session — a `Handoff-Status/` report, a
+  `ledger-inbox/` row, an update to this project's own `Snapshot.md` or
+  `Session-Index.md` — go to `cannonops-vault-fwl`, not the shared
+  checkout.** Reach it with `/add-dir C:\Users\joelc\Projects\cannonops-vault-fwl`
+  (or a direct path) before writing. This worktree is not currently synced
+  back to `main` on any schedule — merge or push it at this project's own
+  session/feature-close gate, per the pattern's own design.
+
 ## FamilySearch API Rules
 
 1. **Beta first.** All development targets the FamilySearch **beta** environment (`FAMILYSEARCH_ENV=beta`). Never production until Compatibility Review is passed.
