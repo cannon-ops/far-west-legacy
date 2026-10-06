@@ -2,8 +2,8 @@
 
 Standing rules for Claude Code (Agent 13) sessions.
 
-<!-- STD:BEGIN v1 (260807) -->
-## Standing Conventions (v1, 260807)
+<!-- STD:BEGIN v4 (261006) -->
+## Standing Conventions (v4, 261006)
 
 ### STD-001: Copy rule — no em dashes
 Never use em dashes (—) in anything a human reads as finished copy: website text, emails,
@@ -40,11 +40,20 @@ with an agent and not yet back. Three rules, and each is one action rather than 
 remember separately:
 
 - **Session open:** sweep it and report every `OPEN` and `BLOCKED` row before anything else.
-  `Select-String -Path "C:\Users\joelc\Projects\cannonops-vault\Handoff-Status\LEDGER.md" -Pattern "^\|\s*H-\d+\s*\|\s*(OPEN|BLOCKED)\s*\|"`
+  `Select-String -Path "C:\Users\joelc\Projects\cannonops-vault\Handoff-Status\LEDGER.md" -Pattern "^\|\s*(H|L)-\d+\s*\|\s*(OPEN|BLOCKED)\s*\|"`
 - **Writing a handoff prompt:** add the row in the same action that writes the prompt. A handoff
   that exists only in chat is invisible to Chief the moment the chat scrolls.
 - **Finishing a handoff:** the step that writes the report into `Handoff-Status/` also flips that
   row to `DONE` with today's date and the report filename. Same step, not a follow-up.
+
+ID scheme: new rows use `L-NNN`, not `H-NNN`. The prefix changed (COO-013) because `H-NNN`
+collided with the unrelated `Hn` handoff-tag counter from STD-006, which is per-session and
+resets every session, unlike the ledger's own monotonic count, so the same letter meant two
+different things depending which system you were reading. `L-NNN` continues the same count
+`H-NNN` was using rather than restarting it: the next new row is the highest existing `H-NNN`
+plus one, so the ledger reads as one continuous numeric stream across the prefix change. Existing
+`H-NNN` rows already in the ledger are legacy, stay exactly as written, and are never renamed to
+`L-NNN` retroactively.
 
 Format and field rules live in the ledger's own header. It is not a to-do list: `Open-Items.md`
 tracks unresolved *conditions*, the ledger tracks *work packets an agent can be handed*.
@@ -68,7 +77,8 @@ applies the moment the repo ships something a person sees.
 ### STD-006: Session tag
 Every handoff prompt carries a tag [PROJ-SSS-Hn | Ddd MM-DD HH:MM TZ]: project
 code, session number, handoff number within that session, readable stamp. Project
-codes: SYK, GWT, MSG, DCHS, FWL, HRM, KPR, COO, GMU. The Hn counter is the primary
+codes: SYK, GWT, MSG, DCHS, FWL, HRM, KPR, COO, GMU, CMT. CMT replaces CGL (renamed
+2026-10); historic CGL-NNN ids stay as history. The Hn counter is the primary
 staleness signal (a handoff number already pasted is stale); the clock is
 secondary. Wall-clock time is read at write time, never guessed or hardcoded.
 Session numbers come from that project's Session-Index.md in cannonops-vault, and
@@ -77,6 +87,10 @@ the row is added at session open, not at close.
 Every handoff prompt ends with an output contract as its last line, telling the
 agent to open its reply with [PROJ-SSS-Hn | done <time it read itself>]. Last-line
 placement is deliberate; header placement gets dropped.
+
+Every handoff prompt's first line after the tag states the surface and model:
+`AGENT: <surface> · MODEL: <model> · (<one-line why>)`. Surface is Claude Code (A13),
+Cowork, or chat.
 
 Exception, and it is not optional: a handoff that edits global settings, installs
 auto-running code, or otherwise carries real blast radius is written in Chief's own
